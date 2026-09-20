@@ -1,0 +1,191 @@
+/* =========================================================
+   LCCAST
+   SHARED NAVIGATION
+========================================================= */
+
+
+/* =========================================================
+   MOBILE NAVIGATION BUTTON
+========================================================= */
+
+.mobile-nav-toggle {
+
+    display:none;
+
+    position:fixed;
+
+    top:16px;
+
+    right:16px;
+
+    width:44px;
+
+    height:44px;
+
+    align-items:center;
+
+    justify-content:center;
+
+    border:1px solid var(--border);
+
+    border-radius:10px;
+
+    background:var(--card);
+
+    color:var(--text);
+
+    font-size:22px;
+
+    cursor:pointer;
+
+    box-shadow:var(--shadow-sm);
+
+    z-index:10001;
+
+    transition:var(--transition);
+
+}
+
+.mobile-nav-toggle:hover {
+
+    color:var(--primary);
+
+    border-color:var(--primary);
+
+}
+
+
+/* =========================================================
+   MOBILE NAVIGATION OVERLAY
+========================================================= */
+
+.mobile-nav-overlay {
+
+    display:none;
+
+    position:fixed;
+
+    inset:0;
+
+    background:rgba(0,0,0,.35);
+
+    z-index:9998;
+
+}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width:1000px) {
+
+    /* -----------------------------------------------------
+       BURGER BUTTON
+    ----------------------------------------------------- */
+
+    .mobile-nav-toggle {
+
+        display:flex;
+
+    }
+
+
+    /* -----------------------------------------------------
+       SIDEBAR
+    ----------------------------------------------------- */
+
+.sidebar {
+
+    display: flex !important;
+
+    position: fixed !important;
+
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: auto !important;
+
+    width: 260px !important;
+    height: 100vh !important;
+
+    margin: 0 !important;
+
+    transform: translateX(100%) !important;
+
+    visibility: visible !important;
+    opacity: 1 !important;
+
+    z-index: 10000 !important;
+
+    transition: transform .25s ease !important;
+
+}
+
+    
+.sidebar.mobile-open {
+
+    transform: translateX(0) !important;
+
+}
+
+
+
+
+    /* -----------------------------------------------------
+       OVERLAY
+    ----------------------------------------------------- */
+
+    .mobile-nav-overlay {
+
+    display:block;
+
+    opacity:0;
+
+    visibility:hidden;
+
+    pointer-events:none;
+
+    z-index:9998;
+
+    transition:
+
+        opacity .25s ease,
+
+        visibility .25s ease;
+
+}
+
+
+    .mobile-nav-overlay.mobile-open {
+
+    opacity:1;
+
+    visibility:visible;
+
+    pointer-events:auto;
+
+    z-index:9998;
+
+}
+
+
+    /* -----------------------------------------------------
+       MAIN CONTENT
+    ----------------------------------------------------- */
+
+    .main-content {
+
+        margin-left:0;
+
+        width:100%;
+
+    }
+
+    body.mobile-nav-active {
+
+    overflow:hidden;
+
+}
+
+}

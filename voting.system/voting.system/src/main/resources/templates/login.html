@@ -1,0 +1,262 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>LCCast - Login</title>
+
+    <link rel="stylesheet" href="/css/styles.css" />
+    <link rel="stylesheet" href="/css/modal.css" />
+</head>
+
+<body>
+<div class="login-page">
+    <!-- =====================================================
+       LOGIN CARD
+  ====================================================== -->
+
+    <main class="login-container">
+        <img src="/images/lcccast_logo.png" alt="LCC Cast" class="login-logo" id="loginLogoCircle" />
+
+        <h1 class="logo-text" id="loginSystemName">LCC Cast</h1>
+
+        <p class="tagline" id="loginTagline">Secure Voting System</p>
+
+        <!-- =================================================
+             LOGIN FORM
+        ================================================== -->
+
+        <form id="loginForm" th:action="@{/login}" method="post" novalidate>
+            <!-- School ID -->
+
+            <div class="login-form-group">
+                <label for="schoolId"> School ID </label>
+
+                <input
+                        type="text"
+                        id="schoolId"
+                        name="schoolId"
+                        autocomplete="username"
+                        placeholder="Enter your school ID"
+                        th:value="${schoolId}"
+                />
+
+                <span class="inline-error" id="schoolIdError"> </span>
+            </div>
+
+            <div class="login-form-group">
+                <label for="password"> Password </label>
+
+                <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        autocomplete="current-password"
+                        placeholder="Enter your password"
+                />
+
+                <span class="inline-error" id="passwordError"> </span>
+
+                <span
+                        class="inline-error server-error"
+                        id="loginServerError"
+                        th:if="${loginError}"
+                >
+              Invalid School ID or password.
+            </span>
+            </div>
+
+            <!-- Forgot Password -->
+
+            <button type="button" class="forgot-password" id="forgotPasswordBtn">
+                Forgot Password?
+            </button>
+
+            <!-- Login -->
+
+            <button type="submit" class="login-button">Log in</button>
+        </form>
+    </main>
+</div>
+
+<!-- =========================================================
+ FORGOT PASSWORD MODAL
+========================================================== -->
+
+<div class="modal-overlay" id="forgotPasswordModal" aria-hidden="true">
+    <div
+            class="forgot-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forgotPasswordTitle"
+    >
+        <!-- CLOSE -->
+        <button
+                type="button"
+                class="modal-close"
+                id="closeForgotModal"
+                aria-label="Close"
+        >
+            &times;
+        </button>
+
+        <!-- =================================================
+             STEP 1 — EMAIL VERIFICATION
+        ================================================== -->
+
+        <div class="reset-step active" id="resetEmailStep">
+            <div class="reset-icon">@</div>
+
+            <h2 id="forgotPasswordTitle">Forgot Password?</h2>
+
+            <p>
+                Enter the registered email address associated with your account.
+            </p>
+
+            <div class="login-form-group">
+                <label for="registeredEmail"> Registered Email </label>
+
+                <input
+                        type="email"
+                        id="registeredEmail"
+                        placeholder="Enter your registered email"
+                        autocomplete="email"
+                />
+
+                <span class="inline-error" id="registeredEmailError"> </span>
+            </div>
+
+            <button type="button" class="login-button" id="verifyEmailBtn">
+                Continue
+            </button>
+        </div>
+
+        <!-- =================================================
+ STEP 2 — OTP VERIFICATION
+================================================== -->
+
+        <div class="reset-step" id="otpStep">
+            <div class="reset-icon">#</div>
+
+            <h2>Verify OTP</h2>
+
+            <p>
+                Enter the 6-digit verification code sent to your registered email.
+            </p>
+
+            <div class="login-form-group">
+                <label for="otp"> 6-Digit OTP </label>
+
+                <input
+                        type="text"
+                        id="otp"
+                        name="otp"
+                        inputmode="numeric"
+                        maxlength="6"
+                        autocomplete="one-time-code"
+                        placeholder="Enter 6-digit OTP"
+                />
+
+                <span class="inline-error" id="otpError"> </span>
+            </div>
+
+            <button type="button" class="login-button" id="verifyOtpBtn">
+                Verify OTP
+            </button>
+        </div>
+
+        <!-- =================================================
+             STEP 3 — NEW PASSWORD
+        ================================================== -->
+
+        <div class="reset-step" id="newPasswordStep">
+            <div class="reset-icon">🔒</div>
+
+            <h2>Create New Password</h2>
+
+            <p>Choose a strong new password for your account.</p>
+
+            <div class="login-form-group">
+                <label for="newPassword"> New Password </label>
+
+                <input
+                        type="password"
+                        id="newPassword"
+                        placeholder="Enter new password"
+                        autocomplete="new-password"
+                />
+
+                <span class="inline-error" id="newPasswordError"> </span>
+            </div>
+
+            <div class="login-form-group">
+                <label for="confirmPassword"> Confirm Password </label>
+
+                <input
+                        type="password"
+                        id="confirmPassword"
+                        placeholder="Confirm new password"
+                        autocomplete="new-password"
+                />
+
+                <span class="inline-error" id="confirmPasswordError"> </span>
+            </div>
+
+            <button type="button" class="login-button" id="resetPasswordBtn">
+                Change Password
+            </button>
+        </div>
+
+        <!-- =================================================
+             STEP 4 — SUCCESS
+        ================================================== -->
+
+        <div class="reset-step" id="resetSuccessStep">
+            <div class="reset-icon success">✓</div>
+
+            <h2>Password Changed</h2>
+
+            <p>
+                Your password has been successfully changed. You can now log in
+                using your new password.
+            </p>
+
+            <button type="button" class="login-button" id="returnToLoginBtn">
+                Return to Login
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================
+     ACTION LOADING MODAL
+========================================================== -->
+
+<div
+        class="modal-overlay loading-modal-overlay"
+        id="actionLoadingModal"
+        aria-hidden="true"
+>
+    <div
+            class="action-loading-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="actionLoadingTitle"
+    >
+        <div class="action-loading-spinner">
+            <span></span>
+        </div>
+
+        <div class="action-loading-content">
+            <h2 id="actionLoadingTitle">Please Wait</h2>
+
+            <p id="actionLoadingMessage">Processing your request...</p>
+        </div>
+    </div>
+</div>
+
+<script src="/js/login.js"></script>
+</body>
+</html>

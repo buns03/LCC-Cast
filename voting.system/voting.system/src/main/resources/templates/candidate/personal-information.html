@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <title>Personal Information | LCCast</title>
+
+    <link rel="stylesheet" href="/css/base.css" />
+    <link rel="stylesheet" href="/css/voter/layout.css" />
+    <link rel="stylesheet" href="/css/components.css" />
+    <link rel="stylesheet" href="/css/forms.css" />
+    <link rel="stylesheet" href="/css/modal.css" />
+    <link rel="stylesheet" href="/css/navigation.css" />
+    <link rel="stylesheet" href="/css/candidate/candidate-portal.css" />
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+</head>
+
+<body>
+<button type="button" class="mobile-nav-toggle" id="mobileNavToggle" aria-label="Open navigation" aria-expanded="false">
+    <i class="bi bi-list"></i>
+</button>
+
+<div class="mobile-nav-overlay" id="mobileNavOverlay"></div>
+
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+        <div class="logo">
+            <img src="/images/lcccast_logo.png" alt="LCCast" />
+            <h2>LCC Cast</h2>
+        </div>
+
+        <hr />
+
+        <nav>
+            <a href="/candidate/personal-information" class="active">
+                <i class="bi bi-person-vcard"></i>
+                <span>Personal Information</span>
+            </a>
+
+            <a href="/candidate/partylist-information">
+                <i class="bi bi-people"></i>
+                <span>Partylist Information</span>
+            </a>
+            <hr />
+
+            <a href="/voter/ssc-election">
+                <i class="bi bi-calendar-event"></i>
+                <span>SSC Election</span>
+            </a>
+
+            <a href="/voter/department-election">
+                <i class="bi bi-building"></i>
+                <span>Department Election</span>
+            </a>
+
+            <a href="/voter/vote-summaries">
+                <i class="bi bi-bar-chart"></i>
+                <span>Vote Summaries</span>
+            </a>
+        </nav>
+    </div>
+
+    <div class="sidebar-bottom">
+        <hr />
+
+        <a href="/candidate/settings">
+            <i class="bi bi-gear"></i>
+            <span>Settings</span>
+        </a>
+
+        <a href="#" class="logout-trigger">
+            <i class="bi bi-box-arrow-right"></i>
+            <span>Logout</span>
+        </a>
+    </div>
+</aside>
+
+<main class="main-content">
+    <header class="topbar">
+        <div>
+            <h1>Personal Information</h1>
+            <p>Manage the photo, background, and campaign image shown to voters.</p>
+        </div>
+
+        <div class="profile">
+            <div class="avatar">
+                <img th:if="${avatarUrl}" th:src="${avatarUrl}" alt="Avatar"
+                     style="width:100%;height:100%;border-radius:50%;object-fit:cover;" id="topbarAvatarImg" />
+            </div>
+
+            <div class="profile-info">
+                <span th:text="${displayName}">Username</span>
+                <small>Candidate</small>
+            </div>
+        </div>
+    </header>
+
+    <section class="candidate-portal-content">
+
+        <!-- PHOTO -->
+        <div class="candidate-image-card">
+            <div class="candidate-image-card-header">
+                <h3><i class="bi bi-person-circle"></i> Photo</h3>
+                <p>Used as your avatar and on candidate/member listings.</p>
+            </div>
+
+            <div class="candidate-image-row">
+                <div class="candidate-image-preview candidate-image-preview-round" id="photoPreviewWrapper">
+                    <img id="photoPreview" src="/images/default-avatar.png" alt="Photo" />
+                </div>
+
+                <div class="candidate-image-actions">
+                    <input type="file" id="photoInput" accept="image/png,image/jpeg,image/webp" hidden />
+                    <button type="button" class="secondary-btn" id="changePhotoBtn">
+                        <i class="bi bi-upload"></i> Upload Photo
+                    </button>
+                    <small class="field-error" id="photoError"></small>
+                </div>
+            </div>
+        </div>
+
+        <!-- BACKGROUND -->
+        <div class="candidate-image-card">
+            <div class="candidate-image-card-header">
+                <h3><i class="bi bi-image"></i> Background</h3>
+                <p>A wide background image used on your candidate profile.</p>
+            </div>
+
+            <div class="candidate-image-row">
+                <div class="candidate-image-preview candidate-image-preview-wide" id="backgroundPreviewWrapper">
+                    <img id="backgroundPreview" src="/images/campaign-placeholder.png" alt="Background" />
+                </div>
+
+                <div class="candidate-image-actions">
+                    <input type="file" id="backgroundInput" accept="image/png,image/jpeg,image/webp" hidden />
+                    <button type="button" class="secondary-btn" id="changeBackgroundBtn">
+                        <i class="bi bi-upload"></i> Upload Background
+                    </button>
+                    <small class="field-error" id="backgroundError"></small>
+                </div>
+            </div>
+        </div>
+
+        <!-- CAMPAIGN -->
+        <div class="candidate-image-card">
+            <div class="candidate-image-card-header">
+                <h3><i class="bi bi-megaphone"></i> Campaign Image</h3>
+                <p>Shown to voters when they view your campaign.</p>
+            </div>
+
+            <div class="candidate-image-row">
+                <div class="candidate-image-preview candidate-image-preview-wide" id="campaignPreviewWrapper">
+                    <img id="campaignPreview" src="/images/campaign-placeholder.png" alt="Campaign" />
+                </div>
+
+                <div class="candidate-image-actions">
+                    <input type="file" id="campaignInput" accept="image/png,image/jpeg,image/webp" hidden />
+                    <button type="button" class="secondary-btn" id="changeCampaignBtn">
+                        <i class="bi bi-upload"></i> Upload Campaign Image
+                    </button>
+                    <small class="field-error" id="campaignError"></small>
+                </div>
+            </div>
+        </div>
+
+    </section>
+</main>
+
+<div class="modal-overlay" id="logoutModal">
+    <div class="delete-modal logout-modal">
+        <div class="delete-modal-content">
+            <div class="delete-modal-icon"><i class="bi bi-box-arrow-right"></i></div>
+            <h2>Logout?</h2>
+            <p>Are you sure you want to logout from LCCast?</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="logout-cancel-btn" id="cancelLogout">Cancel</button>
+            <button type="button" class="logout-confirm-btn" id="confirmLogout">
+                <i class="bi bi-box-arrow-right"></i> Logout
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay loading-modal-overlay" id="actionLoadingModal">
+    <div class="action-loading-modal">
+        <div class="action-loading-spinner"><span></span></div>
+        <div class="action-loading-content">
+            <h2 id="actionLoadingTitle">Processing...</h2>
+            <p id="actionLoadingMessage">Please wait while we process your request.</p>
+        </div>
+    </div>
+</div>
+
+<div class="success-toast" id="successToast" aria-live="polite">
+    <div class="success-toast-icon"><i class="bi bi-check-lg"></i></div>
+    <div class="success-toast-content">
+        <strong id="successToastTitle">Success</strong>
+        <span id="successToastMessage">Updated successfully.</span>
+    </div>
+    <button type="button" class="success-toast-close" id="successToastClose" aria-label="Close notification">
+        <i class="bi bi-x-lg"></i>
+    </button>
+</div>
+
+<script src="/js/navigation.js"></script>
+<script src="/js/logout.js"></script>
+<script src="/js/candidate/personal-information.js"></script>
+</body>
+</html>

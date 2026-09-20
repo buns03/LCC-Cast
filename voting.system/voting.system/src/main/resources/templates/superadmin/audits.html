@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="UTF-8" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <meta
+      http-equiv="Cache-Control"
+      content="no-store, no-cache, must-revalidate, max-age=0"
+    />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <title>LCCast - Audit Logs</title>
+
+    <!-- Bootstrap Icons -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    />
+
+    <!-- Base System CSS -->
+    <link rel="stylesheet" href="/css/base.css" />
+    <link rel="stylesheet" href="/css/layout.css" />
+    <link rel="stylesheet" href="/css/components.css" />
+    <link rel="stylesheet" href="/css/forms.css" />
+    <link rel="stylesheet" href="/css/modal.css" />
+
+    <!-- Page CSS -->
+    <link rel="stylesheet" href="/css/pages/audit-logs.css" />
+  </head>
+
+  <body>
+    <!-- ===========================
+SIDEBAR
+============================ -->
+
+    <button
+      type="button"
+      class="mobile-nav-toggle"
+      id="mobileNavToggle"
+      aria-label="Open navigation"
+      aria-expanded="false"
+    >
+      <i class="bi bi-list"></i>
+    </button>
+
+    <!-- ===========================
+    MOBILE NAVIGATION OVERLAY
+    ============================ -->
+
+    <div class="mobile-nav-overlay" id="mobileNavOverlay"></div>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-top">
+        <div class="logo">
+          <img src="/images/lcccast_logo.png" alt="LCCast" />
+
+          <h2 >LCC Cast</h2>
+        </div>
+
+        <hr />
+
+        <nav>
+          <a href="/superadmin/dashboard.html">
+            <i class="bi bi-house-door"></i>
+
+            Dashboard
+          </a>
+
+          <a href="/superadmin/elections.html">
+            <i class="bi bi-calendar-event"></i>
+
+            Elections
+          </a>
+
+          <a href="/superadmin/live-results.html">
+            <i class="bi bi-broadcast-pin"></i>
+
+            Live Results
+          </a>
+
+          <a href="/superadmin/partylists.html">
+            <i class="bi bi-people"></i>
+
+            Partylists
+          </a>
+
+          <a href="/superadmin/departments.html">
+            <i class="bi bi-building"></i>
+
+            Departments
+          </a>
+
+          <a href="/superadmin/voters.html">
+            <i class="bi bi-person-vcard"></i>
+
+            Voters
+          </a>
+
+          <a href="/superadmin/analytics.html">
+            <i class="bi bi-bar-chart"></i>
+
+            Analytics
+          </a>
+
+          <a href="/superadmin/audits.html" class="active">
+            <i class="bi bi-clock-history"></i>
+
+            Audit Logs
+          </a>
+        </nav>
+      </div>
+
+      <div class="sidebar-bottom">
+        <hr />
+
+        <a href="/superadmin/settings.html">
+          <i class="bi bi-gear"></i>
+
+          Settings
+        </a>
+
+        <a th:href="@{/logout}">
+          <i class="bi bi-box-arrow-right"></i>
+
+          Logout
+        </a>
+      </div>
+    </aside>
+
+    <!-- =========================================================
+         MAIN CONTENT
+    ========================================================== -->
+
+    <main class="main-content">
+      <!-- =====================================================
+             TOPBAR
+        ====================================================== -->
+
+      <div class="topbar">
+        <div>
+          <h1>Audit Logs</h1>
+
+          <p>Monitor and review voting activity</p>
+        </div>
+
+        <div class="profile">
+
+          <div class="avatar"></div>
+
+          <span th:text="${displayName}">Username</span>
+
+        </div>
+      </div>
+
+      <!-- =====================================================
+             AUDIT LOG CARD
+        ====================================================== -->
+
+      <section class="audit-card">
+        <!-- =================================================
+                 CARD HEADER
+            ================================================== -->
+
+        <div class="audit-card-header">
+          <div class="audit-title">
+            <i class="bi bi-clock-history"></i>
+
+            <span>Vote Logs</span>
+          </div>
+        </div>
+
+        <!-- =================================================
+                 FILTER AREA
+            ================================================== -->
+
+        <div class="audit-toolbar">
+          <!-- SEARCH -->
+
+          <div class="audit-search-wrapper">
+            <i class="bi bi-search"></i>
+
+            <input
+              type="text"
+              id="auditSearch"
+              placeholder="Search student ID or name..."
+              autocomplete="off"
+            />
+
+            <!-- AUTOCOMPLETE -->
+
+            <div class="autocomplete-list" id="autocompleteList"></div>
+          </div>
+
+          <!-- FILTERS -->
+
+          <div class="audit-filters">
+            <!-- YEAR LEVEL -->
+
+            <div class="filter-wrapper">
+              <select id="yearFilter">
+                <option value="all">Year Level</option>
+
+                <option value="1st Year">1st Year</option>
+
+                <option value="2nd Year">2nd Year</option>
+
+                <option value="3rd Year">3rd Year</option>
+
+                <option value="4th Year">4th Year</option>
+              </select>
+            </div>
+
+            <!-- PROGRAM -->
+
+            <div class="filter-wrapper">
+              <select id="programFilter">
+                <option value="all">Program</option>
+
+                <option value="BSA">BSA</option>
+
+                <option value="BSBA">BSBA</option>
+
+                <option value="BSCA">BSCA</option>
+
+                <option value="BSCrim">BSCrim</option>
+
+                <option value="BSE">BSE</option>
+
+                <option value="BSHM">BSHM</option>
+
+                <option value="BSIS">BSIS</option>
+
+                <option value="BSPSY">BSPSY</option>
+
+                <option value="BSCOM">BSCOM</option>
+              </select>
+            </div>
+
+            <!-- VOTE TYPE -->
+
+            <div class="filter-wrapper">
+              <select id="voteTypeFilter">
+                <option value="all">Vote Type</option>
+
+                <option value="SSC">SSC</option>
+
+                <option value="Department">Department</option>
+              </select>
+            </div>
+
+            <!-- STATUS -->
+
+            <div class="filter-wrapper">
+              <select id="statusFilter">
+                <option value="all">Status</option>
+
+                <option value="Completed">Completed</option>
+
+                <option value="Partial">Partial</option>
+              </select>
+            </div>
+
+            <!-- EXPORT -->
+
+            <button type="button" class="audit-export-btn" id="exportAuditBtn">
+              <i class="bi bi-file-earmark-pdf"></i>
+
+              Export PDF
+            </button>
+          </div>
+        </div>
+
+        <!-- =================================================
+                 FILTER SUMMARY
+            ================================================== -->
+
+        <div class="audit-filter-summary">
+          <span id="resultCount"> 0 vote logs </span>
+
+          <button type="button" id="clearFiltersBtn" class="clear-filters-btn">
+            <i class="bi bi-x-circle"></i>
+
+            Clear Filters
+          </button>
+        </div>
+
+        <!-- =================================================
+                 TABLE
+            ================================================== -->
+
+        <div class="audit-table-wrapper">
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Student Details</th>
+
+                <th>Vote Type</th>
+
+                <th>Time Voted</th>
+              </tr>
+            </thead>
+
+            <tbody id="auditTableBody">
+              <!-- JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- =================================================
+                 EMPTY STATE
+            ================================================== -->
+
+        <div class="audit-empty hidden" id="auditEmpty">
+          <i class="bi bi-search"></i>
+
+          <h3>No Vote Logs Found</h3>
+
+          <p>No audit logs match the current search or filters.</p>
+        </div>
+
+        <!-- =================================================
+                 PAGINATION
+            ================================================== -->
+
+        <div class="audit-pagination">
+          <button
+            type="button"
+            id="previousPage"
+            class="pagination-arrow"
+            aria-label="Previous page"
+          >
+            <i class="bi bi-arrow-left"></i>
+          </button>
+
+          <span id="pageIndicator"> Page 1 / 1 </span>
+
+          <button
+            type="button"
+            id="nextPage"
+            class="pagination-arrow"
+            aria-label="Next page"
+          >
+            <i class="bi bi-arrow-right"></i>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- =========================================================
+         PDF LIBRARIES
+    ========================================================== -->
+
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- PAGE JS -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+    <script src="/js/superadmin/audit-logs.js"></script>
+  </body>
+</html>
