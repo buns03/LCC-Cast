@@ -6,6 +6,23 @@
 
 const DEPARTMENT_API = "/admin-dept/api/departments";
 
+// School year starts in June (month index 5). Keep this the same on every page.
+const SCHOOL_YEAR_START_MONTH = 5;
+
+function getCurrentSchoolYear(date = new Date()) {
+    const year = date.getFullYear();
+    const startYear = date.getMonth() >= SCHOOL_YEAR_START_MONTH ? year : year - 1;
+    return `${startYear}-${startYear + 1}`;
+}
+
+function initializeDefaultSchoolYear() {
+    const input = document.getElementById("departmentsSchoolYear");
+    if (!input) return;
+
+    const schoolYear = getCurrentSchoolYear();
+    input.defaultValue = schoolYear; // form.reset() restores this
+    input.value = schoolYear;        // still editable
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
     initializeDepartmentsTabs();
@@ -20,10 +37,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     initializeSuccessToast();
     initializeValidationBindings();
     initializeDepartmentTitlePrefix();
+    initializeDefaultSchoolYear();
 
     initializeVotingType();
 
     await loadExistingDepartments();
+    connectDepartmentsSocket();
 });
 
 const DEFAULT_POSITIONS = [
@@ -31,13 +50,24 @@ const DEFAULT_POSITIONS = [
     "Auditor", "PRO Internal", "PRO External"
 ];
 
+function sortMembersByPosition(members) {
+    return [...members].sort((a, b) => {
+        const posA = DEFAULT_POSITIONS.indexOf(a.position);
+        const posB = DEFAULT_POSITIONS.indexOf(b.position);
+        // Unknown/custom positions (e.g. "Member", "Others" text) fall after the known ones, keeping their relative order
+        const rankA = posA === -1 ? DEFAULT_POSITIONS.length : posA;
+        const rankB = posB === -1 ? DEFAULT_POSITIONS.length : posB;
+        return rankA - rankB;
+    });
+}
+
 let pendingDeleteCard = null;
 let pendingArchiveCard = null;
 let pendingSaveAction = null;
 let successToastTimeout = null;
 let discardToastTimeout = null;
 
-async function loadExistingDepartments() {
+async function loadExistingDepartments(force = false) {
 
     const list = document.querySelector("#existingDepartments .departments-list");
 
@@ -45,18 +75,16 @@ async function loadExistingDepartments() {
 
     try {
 
-        const response = await fetch(`${DEPARTMENT_API}`, {
-            method: "GET",
-            headers: {
-                "Accept": "application/json"
+        const departments = await SoftCache.load(DEPARTMENT_API, {
+            force,
+            onRevalidated: () => {
+                // Don't rebuild the DOM while the admin is editing or has a card open
+                if (document.querySelector(
+                    "#existingDepartments .departments-item.editing, #existingDepartments .departments-item.show"
+                )) return;
+                loadExistingDepartments();
             }
         });
-
-        if (!response.ok) {
-            throw new Error(`Failed to load departments: ${response.status}`);
-        }
-
-        const departments = await response.json();
 
         list.innerHTML = "";
 
@@ -263,7 +291,7 @@ async function loadExistingDepartments() {
             bindEditForm(card);
             initializeEditPositions(card, department);
 
-            await loadDepartmentMembers(card, department.id);
+            await loadDepartmentMembers(card, department.id, force);
         }
 
         refreshExisting();
@@ -282,29 +310,25 @@ async function loadExistingDepartments() {
     initializeDepartmentTitlePrefix();
 }
 
-async function loadDepartmentMembers(card, departmentId) {
+async function loadDepartmentMembers(card, departmentId, force = false) {
 
     const memberList = card.querySelector(".existing-member-list");
 
     if (!memberList || !departmentId) return;
 
     try {
-
-        const response = await fetch(
+        const rawMembers = await SoftCache.load(
             `${DEPARTMENT_API}/${departmentId}/members`,
             {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json"
+                force,
+                onRevalidated: () => {
+                    if (card.isConnected && !card.classList.contains("editing")) {
+                        loadDepartmentMembers(card, departmentId);
+                    }
                 }
             }
         );
-
-        if (!response.ok) {
-            throw new Error("Failed to load department members.");
-        }
-
-        const members = await response.json();
+        const members = Array.isArray(rawMembers) ? sortMembersByPosition(rawMembers) : rawMembers;
 
         memberList.innerHTML = "";
 
@@ -488,7 +512,7 @@ function showExistingMemberFile(memberElement, type) {
             message = "No background/COC uploaded.";
         }
 
-        alert(message);
+        showFileErrorToast(message);
         return;
     }
 
@@ -590,6 +614,7 @@ function showExistingMemberFile(memberElement, type) {
     `;
 
     document.body.appendChild(preview);
+    applyDocumentPreviewRatio(preview, type);
 
     const clickedButton =
         type === "campaign"
@@ -1105,8 +1130,10 @@ function showMemberFilePreview(row, type) {
             deleteMemberFile(row, type);
         });
 
+    applyDocumentPreviewRatio(preview, type);
+
     requestAnimationFrame(() => {
-        positionMemberFilePreview(row, preview);
+        positionMemberFilePreview(row, preview, type);
     });
 }
 
@@ -1974,4 +2001,75 @@ function initializeVotingType() {
     votingType.addEventListener("change", updateVisibility);
 
     updateVisibility();
+}
+
+function showFileErrorToast(message) {
+    let toast = document.getElementById("fileErrorToast");
+
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "fileErrorToast";
+        toast.className = "success-toast error";
+
+        toast.innerHTML = `
+            <div class="success-toast-icon">
+                <i class="bi bi-exclamation-circle-fill"></i>
+            </div>
+
+            <div class="success-toast-content">
+                <strong>No File Uploaded</strong>
+                <span id="fileErrorToastMessage"></span>
+            </div>
+
+            <button
+                type="button"
+                class="success-toast-close"
+                id="fileErrorToastClose"
+                aria-label="Close notification">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        `;
+
+        document.body.appendChild(toast);
+
+        toast.querySelector("#fileErrorToastClose")
+            ?.addEventListener("click", () => toast.classList.remove("show"));
+    }
+
+    toast.querySelector("#fileErrorToastMessage").textContent = message;
+
+    requestAnimationFrame(() => toast.classList.add("show"));
+
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => toast.classList.remove("show"), 4000);
+}
+
+/* ==========================================================
+   REAL-TIME UPDATES
+========================================================== */
+
+function connectDepartmentsSocket() {
+    if (typeof SockJS === "undefined") {
+        console.error("SockJS not loaded — real-time department updates disabled.");
+        return;
+    }
+
+    const campusId = document.body.dataset.adminCampusId || "";
+    const topic = campusId ? `/topic/departments/campus/${campusId}` : "/topic/departments";
+
+    if (typeof StompJs !== "undefined") {
+        const client = new StompJs.Client({
+            webSocketFactory: () => new SockJS("/ws-analytics"),
+            reconnectDelay: 4000,
+        });
+        client.onConnect = () => client.subscribe(topic, () => loadExistingDepartments(true));
+        client.activate();
+    } else if (typeof Stomp !== "undefined") {
+        const socket = new SockJS("/ws-analytics");
+        const client = Stomp.over(socket);
+        client.debug = () => {};
+        client.connect({}, () => client.subscribe(topic, () => loadExistingDepartments(true)));
+    } else {
+        console.error("No STOMP client library found — real-time department updates disabled.");
+    }
 }

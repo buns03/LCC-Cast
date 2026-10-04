@@ -93,9 +93,15 @@ function createDepartmentPartylistSkeletonCandidate() {
 let departmentPartylistElectionData = null;
 
 async function fetchDepartmentPartylistElectionData() {
-  const response = await fetch("/voter/api/department-elections/current"); // was department-partylist-elections
-  const data = await response.json().catch(() => ({}));
-  return data;
+    try {
+      return await SoftCache.load("/voter/api/department-elections/current", {
+        ttl: 10000,
+        swr: false,
+      });
+    } catch (error) {
+      console.error("Failed to load department election:", error);
+      return {};
+    }
 }
 
 function formatDateTime(isoString) {
@@ -202,10 +208,10 @@ async function initializeDepartmentPartylistElection() {
   }
 
   if (data.status === "NO_ELECTION" || data.status === "HIDDEN") {
-    renderDepartmentPartylistEmptyState(
-      "No Election Yet",
-      "There is no upcoming or ongoing department election at this time.",
-    );
+        renderDepartmentPartylistEmptyState(
+          "No Department Election Scheduled",
+          "There is currently no upcoming or ongoing department election for your department.",
+        );
     return;
   }
 
@@ -217,19 +223,16 @@ async function initializeDepartmentPartylistElection() {
       campus: data.campus,
       scheduledStartAt: data.scheduledStartAt,
       scheduledEndAt: data.scheduledEndAt,
-      positions: groupCandidatesByPosition(data.candidates),
+      positions: sortByPositionOrder(groupCandidatesByPosition(data.candidates)),
     };
 
     initializeDepartmentPartylistCampaignModal();
     initializeDepartmentPartylistGlobalModalEvents();
 
     if (data.hasVoted) {
-    showDepartmentPartylistVoteThankYou({
-      referenceNumber: "Already Recorded",
-      votedAt: "",
-    });
-    return;
-  }
+      renderDepartmentPartylistAlreadyVoted();
+      return;
+    }
 
   if (data.status === "UPCOMING") {
     renderDepartmentPartylistUpcoming();
@@ -260,20 +263,35 @@ async function initializeDepartmentPartylistElection() {
 
 function renderDepartmentPartylistEmptyState(title, message) {
   const electionContent = document.querySelector(".election-content");
+  if (!electionContent) return;
 
+  electionContent.innerHTML = `
+    <div class="election-instructions">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
+function renderDepartmentPartylistAlreadyVoted() {
+  const electionContent = document.querySelector(".election-content");
   if (!electionContent) return;
 
   electionContent.innerHTML = `
     <section class="vote-thank-you">
       <div class="vote-thank-you-icon">
-        <i class="bi bi-info-circle-fill"></i>
+        <i class="bi bi-check-circle-fill"></i>
       </div>
-      <h2>${escapeHtml(title)}</h2>
-      <p>${escapeHtml(message)}</p>
+
+      <h2>You've Already Voted</h2>
+
+      <p>
+        Your vote for "${escapeHtml(departmentPartylistElectionData.electionName)}" has already been recorded.
+        You can view your selections in the Vote Summaries tab.
+      </p>
     </section>
   `;
 }
-
 function resolveElectionFileUrl(storagePath) {
   if (!storagePath) return null;
 
@@ -393,6 +411,10 @@ function renderDepartmentPartylistElectionContent() {
     </div>
 
     <div class="election-action">
+    <button type="button" class="secondary-btn" id="clearAllDepartmentPartylistVotes">
+        <i class="bi bi-arrow-counterclockwise"></i>
+        Clear All
+      </button>
       <button
         type="button"
         class="primary-btn"
@@ -568,6 +590,15 @@ function createDepartmentPartylistCandidateCard(
             Select
           </span>
         </button>
+        <button
+          type="button"
+          class="candidate-clear-btn"
+          data-candidate-id="${escapeHtml(candidate.id)}"
+          data-position="${escapeHtml(positionName)}"
+          aria-label="Clear selection"
+        >
+          <i class="bi bi-x-lg"></i>
+        </button>
       </div>
     </article>
   `;
@@ -579,24 +610,46 @@ function createDepartmentPartylistCandidateCard(
 
 function initializeDepartmentPartylistCandidateSelection() {
   document.addEventListener("click", (event) => {
-    const button = event.target.closest(
-      ".candidate-select-btn",
-    );
+    const selectButton = event.target.closest(".candidate-select-btn");
 
-    if (!button) return;
+    if (selectButton) {
+      const candidateId = selectButton.dataset.candidateId;
+      const position = selectButton.dataset.position;
 
-    const candidateId = button.dataset.candidateId;
-
-    const position = button.dataset.position;
-
-    if (!candidateId || !position) {
+      if (candidateId && position) {
+        selectDepartmentPartylistCandidate(position, candidateId);
+      }
       return;
     }
 
-    selectDepartmentPartylistCandidate(
-      position,
-      candidateId,
-    );
+    const clearButton = event.target.closest(".candidate-clear-btn");
+
+    if (clearButton) {
+      const position = clearButton.dataset.position;
+      if (position) clearDepartmentPartylistPositionSelection(position);
+    }
+  });
+}
+
+function clearDepartmentPartylistPositionSelection(position) {
+  delete departmentPartylistElectionState.selections[position];
+
+  const positionSection = [...document.querySelectorAll(".election-position")]
+    .find((section) => section.dataset.position === position);
+
+  if (!positionSection) return;
+
+  positionSection.querySelectorAll(".candidate-card").forEach((card) => {
+    card.classList.remove("selected", "dimmed");
+
+    const button = card.querySelector(".candidate-select-btn");
+    if (!button) return;
+
+    const label = button.querySelector("span");
+    const icon = button.querySelector("i");
+
+    if (label) label.textContent = "Select";
+    if (icon) icon.className = "bi bi-check2-circle";
   });
 }
 
@@ -790,6 +843,12 @@ function openDepartmentPartylistCampaignModal(
         "click",
         closeDepartmentPartylistCampaignModal,
       );
+
+      const campaignImg = modal.querySelector("#departmentPartylistCampaignImage");
+          window.applyDocImageRatio?.(
+            campaignImg?.closest(".campaign-image-wrapper"),
+            campaignImg,
+          );
   }
 
     const loadingContent = modal.querySelector(".campaign-loading-content");
@@ -878,18 +937,42 @@ function closeDepartmentPartylistCampaignModal() {
 
 function initializeDepartmentPartylistReviewVoting() {
   document.addEventListener("click", (event) => {
-    const button = event.target.closest(
-      "#reviewDepartmentPartylistVotes",
-    );
+    const reviewButton = event.target.closest("#reviewDepartmentPartylistVotes");
 
-    if (!button) return;
-
-    if (!validateDepartmentPartylistVoteSelections()) {
+    if (reviewButton) {
+      if (!validateDepartmentPartylistVoteSelections()) return;
+      openDepartmentPartylistReviewVoteModal();
       return;
     }
 
-    openDepartmentPartylistReviewVoteModal();
+    const clearAllButton = event.target.closest("#clearAllDepartmentPartylistVotes");
+    if (clearAllButton) clearAllDepartmentPartylistSelections();
   });
+}
+
+function clearAllDepartmentPartylistSelections() {
+  if (Object.keys(departmentPartylistElectionState.selections).length === 0) return;
+
+  departmentPartylistElectionState.selections = {};
+
+  document.querySelectorAll(".candidate-card").forEach((card) => {
+    card.classList.remove("selected", "dimmed");
+
+    const button = card.querySelector(".candidate-select-btn");
+    if (!button) return;
+
+    const label = button.querySelector("span");
+    const icon = button.querySelector("i");
+
+    if (label) label.textContent = "Select";
+    if (icon) icon.className = "bi bi-check2-circle";
+  });
+
+  showDepartmentPartylistVoteToast(
+    "warning",
+    "Selections Cleared",
+    "All your candidate selections have been cleared.",
+  );
 }
 
 /* =========================================================
@@ -1177,8 +1260,8 @@ async function submitDepartmentPartylistVotes() {
       "Vote Submitted",
       "Your vote has been successfully recorded.",
     );
+    renderDepartmentPartylistAlreadyVoted();
 
-    showDepartmentPartylistVoteThankYou(result);
   } catch (error) {
     console.error(
       "Department partylist vote submission failed:",

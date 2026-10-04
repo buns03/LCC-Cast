@@ -700,4 +700,51 @@ RESPONSIVE
 
     }
 
+    .welcome-card h2 {
+        font-size: 22px;
+    }
+
+    .welcome-card p {
+        font-size: 13px;
+    }
+
+    .date h4 {
+        font-size: 16px;
+    }
+
+    .date span {
+        font-size: 12px;
+    }
+
+    .campus-header h2 {
+        font-size: 19px;
+    }
+
+    .campus-header p {
+        font-size: 12.5px;
+    }
+
+    .section-title h3 {
+        font-size: 15px;
+    }
+
+}
+
+@media (max-width:480px) {
+
+    .welcome-card {
+        padding: 18px 20px;
+    }
+
+    .welcome-card h2 {
+        font-size: 19px;
+    }
+
+    .campus-header h2 {
+        font-size: 17px;
+    }
+
+    .number {
+        font-size: 24px;
+    }
 }

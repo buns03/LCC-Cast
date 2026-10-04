@@ -108,9 +108,9 @@ public class CandidateSettingsController {
                 return ResponseEntity.status(404).body(Map.of("message", "Account not found."));
             }
 
-            SupabaseAuthResponse verifyResponse = supabaseAuthService.login(profile.getEmail(), currentPassword);
-
-            if (verifyResponse == null || verifyResponse.getUser() == null) {
+            try {
+                supabaseAuthService.login(profile.getEmail(), currentPassword);
+            } catch (Exception e) {
                 return ResponseEntity.status(403).body(Map.of("message", "Current password is incorrect."));
             }
         }

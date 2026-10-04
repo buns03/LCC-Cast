@@ -789,6 +789,15 @@
 
     }
 
+    .audit-title {
+        font-size: 17px;
+        gap: 8px;
+    }
+
+    .audit-title i:first-child {
+        font-size: 18px;
+    }
+
 }
 
 
@@ -825,6 +834,14 @@
 
         gap:8px;
 
+    }
+
+    .audit-title {
+        font-size: 15px;
+    }
+
+    .audit-card-header {
+        min-height: 56px;
     }
 
 }

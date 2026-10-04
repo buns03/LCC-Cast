@@ -61,14 +61,21 @@ public class AnalyticsDTO {
         public List<CandidateVotes> candidates;
         public List<PartylistVotes> partyLists; // null for department
         public List<ProgramVotes> programVotes; // null for department
+        public List<ProgramVotes> programNotVoted;
         public LabeledSeries yearLevel;
         public LabeledSeries activity;
         public LabeledSeries status; // null for SSC
         public String votingType;
+        public String schoolYear;
+        public String phase;
+        public String parentElectionId;
+        public boolean drawElection;
+        public List<String> drawPositions = List.of();
     }
 
     public static class SSCAnalytics {
         public Map<String, CampusAnalytics> campuses; // key = campus code
+        public Map<String, Map<String, CampusAnalytics>> elections;
     }
 
     public static class DepartmentAnalytics {
@@ -87,5 +94,6 @@ public class AnalyticsDTO {
         public String votingType;
         public boolean hasActiveElection;
         public CampusAnalytics analytics; // null if no active election
+        public List<CampusAnalytics> history;
     }
 }

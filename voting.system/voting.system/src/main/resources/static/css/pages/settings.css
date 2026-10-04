@@ -2101,6 +2101,31 @@
 
     }
 
+    .admin-view-details {
+            padding: 0 18px 16px;
+        }
+
+        .admin-view-row {
+            flex-wrap: wrap;
+            row-gap: 4px;
+            min-height: auto;
+            padding: 6px 0;
+        }
+
+        .admin-view-row span:first-child {
+            width: 100%;
+            font-weight: 600;
+            color: var(--subtext);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .02em;
+        }
+
+        .admin-view-row span:last-child {
+            width: 100%;
+            word-break: break-word;
+        }
+
 }
 
 /* =========================================================
@@ -2142,4 +2167,47 @@
 
     }
 
+}
+
+@media (max-width: 600px) {
+
+    .settings-card-header h2 {
+        font-size: 17px;
+    }
+
+    .settings-card-header p {
+        font-size: 12px;
+    }
+
+    .filters-panel-header strong,
+    .admin-filter-dropdown-header strong {
+        font-size: 13.5px;
+    }
+
+    .admin-item-header {
+            flex-wrap: wrap;
+            row-gap: 12px;
+            align-items: flex-start;
+        }
+
+        .admin-summary {
+            flex: 1 1 100%;
+            width: 100%;
+        }
+
+        .admin-summary h3,
+        .admin-summary span {
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .admin-controls {
+                width: 100%;
+                justify-content: center;
+                margin-left: 0;
+            }
+
+        .admin-icon {
+            flex-shrink: 0;
+        }
 }

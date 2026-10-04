@@ -38,11 +38,13 @@ public class Election {
     @Column(name = "school_year", nullable = false)
     private String schoolYear;
 
-    @Column(name = "start_at", nullable = false)
+    @Column(name = "start_at")            // was nullable = false
     private Instant startAt;
 
-    @Column(name = "end_at", nullable = false)
+    @Column(name = "end_at")              // was nullable = false
     private Instant endAt;
+
+
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
@@ -81,9 +83,22 @@ public class Election {
     )
     private List<ElectionPartylist> electionPartylists = new ArrayList<>();
 
+    @Column(name = "parent_election_id")
+    private UUID parentElectionId;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "draw_positions", columnDefinition = "jsonb")
+    private List<String> drawPositions;
+
+    @Column(name = "draw_checked_at")
+    private Instant drawCheckedAt;
+
+    public boolean isDrawElection() { return parentElectionId != null; }
+
     // Election.java — add import: java.time.Instant, java.time.temporal.ChronoUnit
 
     public ElectionPhase getPhase() {
+        if (startAt == null || endAt == null) return ElectionPhase.UNSCHEDULED;
         Instant now = Instant.now();
 
         if (now.isAfter(endAt)) {
@@ -213,4 +228,11 @@ public class Election {
     public void setElectionPartylists(List<ElectionPartylist> electionPartylists) {
         this.electionPartylists = electionPartylists;
     }
+
+    public UUID getParentElectionId() { return parentElectionId; }
+    public void setParentElectionId(UUID v) { this.parentElectionId = v; }
+    public List<String> getDrawPositions() { return drawPositions; }
+    public void setDrawPositions(List<String> v) { this.drawPositions = v; }
+    public Instant getDrawCheckedAt() { return drawCheckedAt; }
+    public void setDrawCheckedAt(Instant v) { this.drawCheckedAt = v; }
 }

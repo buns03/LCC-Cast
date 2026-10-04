@@ -12,6 +12,12 @@ import lccast.voting.system.event.VoteCastEvent;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import lccast.voting.system.repository.CampusRepository;
 
+import lccast.voting.system.service.DrawDetectionService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +38,8 @@ public class BallotService {
     private final ApplicationEventPublisher eventPublisher;
     private final CampusRepository campusRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private static final Logger log = LoggerFactory.getLogger(BallotService.class);
+    private final DrawDetectionService drawDetectionService;
 
     public BallotService(
             VoterRepository voterRepository,
@@ -44,7 +52,8 @@ public class BallotService {
             VoteLogRepository voteLogRepository,
             ApplicationEventPublisher eventPublisher,
             CampusRepository campusRepository,          // ADD
-            SimpMessagingTemplate messagingTemplate      // ADD
+            SimpMessagingTemplate messagingTemplate,      // ADD
+            DrawDetectionService drawDetectionService
     ) {
         this.voterRepository = voterRepository;
         this.electionRepository = electionRepository;
@@ -57,6 +66,7 @@ public class BallotService {
         this.eventPublisher = eventPublisher;
         this.campusRepository = campusRepository;        // ADD
         this.messagingTemplate = messagingTemplate;       // ADD
+        this.drawDetectionService = drawDetectionService;
     }
 
     public static class VoteItem {
@@ -109,74 +119,86 @@ public class BallotService {
             throw new IllegalStateException("You have already voted in this election.");
         }
 
-        Department department = electionDepartments.get(0); // used below only for votingType (shared across all linked departments)
-
-        List<Candidate> validCandidates = new java.util.ArrayList<>();
-        for (Department dept : electionDepartments) {
-            validCandidates.addAll(
-                    candidateRepository.findByElectionIdAndDepartmentId(electionId, dept.getId())
-            );
-        }
-
-        Set<UUID> validCandidateIds = new HashSet<>();
-        for (Candidate c : validCandidates) {
-            validCandidateIds.add(c.getId());
-        }
+        Department department = electionDepartments.get(0);
+        boolean representative = department.getVotingType() == VotingType.REPRESENTATIVE;
 
         if (votes == null || votes.isEmpty()) {
             throw new IllegalArgumentException("No votes submitted.");
         }
 
+        // Candidates this voter is allowed to vote for
+        Map<UUID, Candidate> candidatesById = new HashMap<>();
+        for (Department dept : electionDepartments) {
+            for (Candidate c : candidateRepository.findByElectionIdAndDepartmentId(electionId, dept.getId())) {
+                candidatesById.put(c.getId(), c);
+            }
+        }
+
+        // Positions actually open (matters for draw/tie re-run elections)
+        Set<String> allowedPositions =
+                new HashSet<>(drawDetectionService.openPositions(election, department));
+
+        Set<String> seenPositions = new HashSet<>();
+        Set<UUID> seenCandidates = new HashSet<>();
+        List<VoteItem> accepted = new ArrayList<>();
+
         for (VoteItem vote : votes) {
+            if (vote.position == null || vote.position.isBlank()) {
+                throw new IllegalArgumentException("Vote item missing position.");
+            }
+            if (!seenPositions.add(vote.position)) {
+                throw new IllegalArgumentException("Duplicate position in submission: " + vote.position);
+            }
             if (vote.skipped || vote.candidateId == null) {
                 continue;
             }
-            if (!validCandidateIds.contains(vote.candidateId)) {
+
+            Candidate candidate = candidatesById.get(vote.candidateId);
+            if (candidate == null) {
                 throw new IllegalArgumentException("Invalid candidate selection.");
             }
+            if (!seenCandidates.add(candidate.getId())) {
+                throw new IllegalArgumentException("A candidate can only be selected once.");
+            }
+            if (!allowedPositions.contains(vote.position)) {
+                throw new IllegalArgumentException("Position is not open for voting: " + vote.position);
+            }
+            if (!representative && !vote.position.equals(candidate.getPosition())) {
+                throw new IllegalArgumentException("Candidate does not match the declared position.");
+            }
+            accepted.add(vote);
         }
+
+        Instant now = Instant.now();
 
         Ballot ballot = new Ballot();
         ballot.setElection(election);
         ballot.setVoter(voter);
-        ballot.setSubmittedAt(Instant.now());
-        ballot.setCreatedAt(Instant.now());
+        ballot.setSubmittedAt(now);
+        ballot.setCreatedAt(now);
 
         Ballot savedBallot;
-
         try {
+            // Unique (election_id, voter_id) in the DB is the real duplicate guard
             savedBallot = ballotRepository.saveAndFlush(ballot);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             throw new IllegalStateException("You have already voted in this election.");
         }
 
-        for (VoteItem vote : votes) {
-            if (vote.skipped || vote.candidateId == null) {
-                continue;
-            }
-
-            Candidate candidate = validCandidates.stream()
-                    .filter(c -> c.getId().equals(vote.candidateId))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalArgumentException("Invalid candidate selection."));
-
+        List<BallotVote> rows = new ArrayList<>();
+        for (VoteItem vote : accepted) {
             BallotVote ballotVote = new BallotVote();
             ballotVote.setBallot(savedBallot);
-            ballotVote.setCandidate(candidate);
-            ballotVote.setPosition(
-                    department.getVotingType() == VotingType.REPRESENTATIVE
-                            ? vote.position
-                            : null
-            );
-            ballotVote.setCreatedAt(Instant.now());
-            ballotVoteRepository.save(ballotVote);
+            ballotVote.setCandidate(candidatesById.get(vote.candidateId));
+            ballotVote.setPosition(representative ? vote.position : null);
+            ballotVote.setCreatedAt(now);
+            rows.add(ballotVote);
         }
+        ballotVoteRepository.saveAll(rows);
 
         voter.setVotingStatus(VotingStatus.VOTED);
-        voter.setTimeVoted(Instant.now());
+        voter.setTimeVoted(now);
         voterRepository.save(voter);
-
-        System.out.println(">>> BallotService.submitDepartmentVote CALLED - election.category=" + election.getCategory());
 
         VoteLog voteLog = voteLogRepository
                 .findByBallotId(savedBallot.getId())
@@ -194,12 +216,10 @@ public class BallotService {
                     newVoteLog.setCampusId(voter.getCampusId());
                     newVoteLog.setSection(voter.getSection());
                     newVoteLog.setVoteStatus(VotingStatus.VOTED);
-                    newVoteLog.setVotedAt(Instant.now());
+                    newVoteLog.setVotedAt(now);
                     newVoteLog.setElectionName(election.getTitle());
                     newVoteLog.setElectionCategory(
-                            election.getCategory() != null
-                                    ? election.getCategory().name()
-                                    : null
+                            election.getCategory() != null ? election.getCategory().name() : null
                     );
                     newVoteLog.setCampusName(
                             campusRepository.findById(voter.getCampusId())
@@ -210,17 +230,37 @@ public class BallotService {
                     return voteLogRepository.save(newVoteLog);
                 });
 
-        messagingTemplate.convertAndSend(
-                "/topic/history/vote-logs",
-                HistoryEventDTO.of("VOTE_CAST", voteLog.getId().toString())
-        );
+        notifyAfterCommit(voteLog.getId().toString());
 
         Map<String, Object> result = new HashMap<>();
         result.put("referenceNumber", savedBallot.getId().toString());
         result.put("votedAt", savedBallot.getSubmittedAt().toString());
-
-        eventPublisher.publishEvent(new VoteCastEvent(this));
-
         return result;
+    }
+
+    /** Runs only after the DB commit succeeds, and never fails the voter's request. */
+    private void notifyAfterCommit(String voteLogId) {
+        Runnable task = () -> {
+            try {
+                messagingTemplate.convertAndSend(
+                        "/topic/history/vote-logs",
+                        HistoryEventDTO.of("VOTE_CAST", voteLogId)
+                );
+                eventPublisher.publishEvent(new VoteCastEvent(BallotService.this));
+            } catch (Exception e) {
+                log.warn("Post-commit vote notification failed", e);
+            }
+        };
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
     }
 }

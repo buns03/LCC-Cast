@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setCurrentDate();
   setActiveSidebar();
   loadDashboardStatistics();
+  connectDashboardSocket();
 });
 
 /* ==========================================================
@@ -68,37 +69,37 @@ function setActiveSidebar() {
    DASHBOARD DATA
 ========================================================== */
 
-async function loadDashboardStatistics() {
+async function loadDashboardStatistics(force = false) {
   try {
-    const response = await fetch(DASHBOARD_API, {
-      headers: { Accept: "application/json" },
+    const data = await SoftCache.load(DASHBOARD_API, {
+      force,
+      onRevalidated: applyDashboardData,
     });
-
-    if (!response.ok) {
-      throw new Error(`Dashboard request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const statistics = data.statistics ?? {};
-
-    const totalVoters = statistics.totalVoters ?? 0;
-    const totalVoted = statistics.totalVoted ?? 0;
-    const activeElection = statistics.activeElection ?? 0;
-    const totalCandidates = statistics.totalCandidates ?? 0;
-
-    const turnout =
-      totalVoters > 0 ? Math.round((totalVoted / totalVoters) * 100) : 0;
-
-    animateNumber("totalVoters", totalVoters);
-    animateNumber("totalVoted", totalVoted);
-    animateNumber("activeElection", activeElection);
-    animateNumber("totalCandidates", totalCandidates);
-    animateNumber("turnout", turnout, "%");
-
-    initializeSSCChart(data.sscVotes ?? []);
+    applyDashboardData(data);
   } catch (error) {
     console.error("Failed to load dashboard statistics:", error);
   }
+}
+
+function applyDashboardData(data) {
+  const statistics = data.statistics ?? {};
+
+  const totalVoters = statistics.totalVoters ?? 0;
+  const totalVoted = statistics.totalVoted ?? 0;
+  const activeElection =
+    statistics.activeElections ?? statistics.activeElection ?? 0;
+  const totalCandidates = statistics.totalCandidates ?? 0;
+
+  const turnout =
+    totalVoters > 0 ? Math.round((totalVoted / totalVoters) * 100) : 0;
+
+  animateNumber("totalVoters", totalVoters);
+  animateNumber("totalVoted", totalVoted);
+  animateNumber("activeElection", activeElection);
+  animateNumber("totalCandidates", totalCandidates);
+  animateNumber("turnout", turnout, "%");
+
+  initializeSSCChart(data.sscVotes ?? []);
 }
 
 /* ==========================================================
@@ -207,4 +208,31 @@ function initializeSSCChart(sscVotes = []) {
       },
     },
   });
+}
+
+/* ==========================================================
+   REAL-TIME UPDATES
+========================================================== */
+
+function connectDashboardSocket() {
+  if (typeof StompJs === "undefined" || typeof SockJS === "undefined") {
+    console.error("StompJs/SockJS not loaded — real-time dashboard updates disabled.");
+    return;
+  }
+
+  const campusId = document.body.dataset.adminCampusId || "";
+  if (!campusId) {
+    console.error("Missing adminCampusId on <body> — cannot scope dashboard socket.");
+    return;
+  }
+
+  const client = new StompJs.Client({
+    webSocketFactory: () => new SockJS("/ws-analytics"),
+    reconnectDelay: 4000,
+    onConnect: () => {
+       client.subscribe(`/topic/dashboard/${campusId}`, () => loadDashboardStatistics(true));
+    },
+  });
+
+  client.activate();
 }

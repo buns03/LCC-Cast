@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -28,5 +29,10 @@ public class AdminSscAnalyticsApiController {
     @GetMapping
     public CampusAnalytics getAnalytics(HttpSession session) {
         return analyticsService.getSscAnalyticsForCampus(requireCampusId(session));
+    }
+
+    @GetMapping("/history")
+    public List<CampusAnalytics> getHistory(HttpSession session) {
+        return analyticsService.getSscAnalyticsHistoryForCampus(requireCampusId(session));
     }
 }

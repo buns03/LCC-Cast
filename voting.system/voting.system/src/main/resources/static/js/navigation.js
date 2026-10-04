@@ -1,238 +1,123 @@
-/* =========================================================
-   LCCAST
-   SHARED MOBILE NAVIGATION
-========================================================= */
-
 document.addEventListener("DOMContentLoaded", function () {
-
-    initializeMobileNavigation();
-
-    applyGlobalBranding();
-
+    buildMobileTabbar();
+    initializeMobileNavToggle();
 });
 
 /* =========================================================
-   GLOBAL BRANDING (SYSTEM NAME + LOGO)
+   MOBILE NAV TOGGLE (hamburger button + overlay)
 ========================================================= */
 
-async function applyGlobalBranding() {
+function initializeMobileNavToggle() {
+    const toggleBtn = document.getElementById("mobileNavToggle");
+    const overlay = document.getElementById("mobileNavOverlay");
+    const sidebar = document.getElementById("sidebar");
 
-    try {
-
-        const res = await fetch("/api/public/branding");
-
-        if (!res.ok) {
-            return;
-        }
-
-        const branding = await res.json();
-
-        const nameEl = document.getElementById("sidebarSystemName");
-
-        const logoImg = document.getElementById("sidebarLogoImg");
-
-        if (nameEl && branding.systemName) {
-            nameEl.textContent = branding.systemName;
-        }
-
-        if (logoImg && branding.hasLogo) {
-            logoImg.src = `/api/public/branding/logo?t=${Date.now()}`;
-        }
-
-    } catch (err) {
-
-        console.error("Failed to load branding:", err);
-
+    if (!toggleBtn || !overlay || !sidebar) {
+        return;
     }
 
+    function openNav() {
+        sidebar.classList.add("open");
+        overlay.classList.add("show");
+        toggleBtn.setAttribute("aria-expanded", "true");
+    }
+
+    function closeNav() {
+        sidebar.classList.remove("open");
+        overlay.classList.remove("show");
+        toggleBtn.setAttribute("aria-expanded", "false");
+    }
+
+    toggleBtn.addEventListener("click", () => {
+        const isOpen = sidebar.classList.contains("open");
+        isOpen ? closeNav() : openNav();
+    });
+
+    overlay.addEventListener("click", closeNav);
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && sidebar.classList.contains("open")) {
+            closeNav();
+        }
+    });
 }
 
-
 /* =========================================================
-   INITIALIZE MOBILE NAVIGATION
+   BUILD MOBILE TAB BAR (replaces burger nav)
 ========================================================= */
 
-function initializeMobileNavigation() {
+function buildMobileTabbar() {
 
-    const toggleButton =
-        document.getElementById("mobileNavToggle");
+    const mainContent = document.querySelector(".main-content");
+    const sidebar = document.getElementById("sidebar");
 
-    const sidebar =
-        document.getElementById("sidebar");
-
-    const overlay =
-        document.getElementById("mobileNavOverlay");
-
-
-    /* =====================================================
-       CHECK REQUIRED ELEMENTS
-    ===================================================== */
-
-    if (!toggleButton) {
-
-        console.warn(
-            "LCCast Navigation: #mobileNavToggle was not found."
-        );
-
+    if (!mainContent || !sidebar) {
         return;
-
     }
 
-    if (!sidebar) {
+    const tabbar = document.createElement("nav");
+    tabbar.className = "mobile-tabbar";
+    tabbar.id = "mobileTabbar";
+    tabbar.setAttribute("aria-label", "Mobile navigation");
 
-        console.warn(
-            "LCCast Navigation: #sidebar was not found."
-        );
+    function makeItem(link) {
 
-        return;
+        const icon = link.querySelector("i");
+        const spanLabel = link.querySelector("span");
 
-    }
+        let labelText = "";
 
-    if (!overlay) {
-
-        console.warn(
-            "LCCast Navigation: #mobileNavOverlay was not found."
-        );
-
-        return;
-
-    }
-
-
-    /* =====================================================
-       OPEN NAVIGATION
-    ===================================================== */
-
-    function openNavigation() {
-
-        sidebar.classList.add("mobile-open");
-
-        overlay.classList.add("mobile-open");
-
-        toggleButton.setAttribute(
-            "aria-expanded",
-            "true"
-        );
-
-        toggleButton.setAttribute(
-            "aria-label",
-            "Close navigation"
-        );
-
-        toggleButton.innerHTML =
-            '<i class="bi bi-x-lg"></i>';
-
-        document.body.classList.add("mobile-nav-active");
-
-    }
-
-
-    /* =====================================================
-       CLOSE NAVIGATION
-    ===================================================== */
-
-    function closeNavigation() {
-
-        sidebar.classList.remove("mobile-open");
-
-        overlay.classList.remove("mobile-open");
-
-        toggleButton.setAttribute(
-            "aria-expanded",
-            "false"
-        );
-
-        toggleButton.setAttribute(
-            "aria-label",
-            "Open navigation"
-        );
-
-        toggleButton.innerHTML =
-            '<i class="bi bi-list"></i>';
-
-        document.body.classList.remove("mobile-nav-active");
-
-    }
-
-
-    /* =====================================================
-       TOGGLE BUTTON
-    ===================================================== */
-
-    toggleButton.addEventListener("click", function (event) {
-
-        event.preventDefault();
-
-        event.stopPropagation();
-
-        if (
-            sidebar.classList.contains("mobile-open")
-        ) {
-
-            closeNavigation();
-
+        if (spanLabel) {
+            // Pages that already wrap the label in <span>
+            labelText = spanLabel.textContent.trim();
         } else {
-
-            openNavigation();
-
+            // Pages with bare text nodes (e.g. dashboard.html)
+            labelText = Array.from(link.childNodes)
+                .filter(node => node.nodeType === Node.TEXT_NODE)
+                .map(node => node.textContent.trim())
+                .join(" ")
+                .trim();
         }
 
+        const item = document.createElement("a");
+        item.className =
+            "tabbar-item" + (link.classList.contains("active") ? " active" : "");
+
+        item.href = link.getAttribute("href") || "#";
+
+        if (labelText) {
+            item.setAttribute("aria-label", labelText);
+            item.setAttribute("title", labelText);
+        }
+
+        item.innerHTML = `
+            ${icon ? `<i class="${icon.className}"></i>` : ""}
+            <span class="tabbar-label">${labelText}</span>
+        `;
+
+        if (link.classList.contains("logout-trigger")) {
+            item.classList.add("logout-trigger");
+            item.href = "#";
+        }
+
+        return item;
+    }
+
+    sidebar.querySelectorAll(".sidebar-top nav a").forEach((a) => {
+        tabbar.appendChild(makeItem(a));
     });
 
+    const bottomLinks = sidebar.querySelectorAll(".sidebar-bottom a");
 
-    /* =====================================================
-       OVERLAY CLICK
-    ===================================================== */
+    if (bottomLinks.length) {
+        const divider = document.createElement("span");
+        divider.className = "tabbar-divider";
+        tabbar.appendChild(divider);
 
-    overlay.addEventListener("click", function () {
-
-        closeNavigation();
-
-    });
-
-
-    /* =====================================================
-       NAVIGATION LINK CLICK
-    ===================================================== */
-
-    sidebar.querySelectorAll("a").forEach(function (link) {
-
-        link.addEventListener("click", function () {
-
-            closeNavigation();
-
+        bottomLinks.forEach((a) => {
+            tabbar.appendChild(makeItem(a));
         });
+    }
 
-    });
-
-
-    /* =====================================================
-       ESC KEY
-    ===================================================== */
-
-    document.addEventListener("keydown", function (event) {
-
-        if (event.key === "Escape") {
-
-            closeNavigation();
-
-        }
-
-    });
-
-
-    /* =====================================================
-       WINDOW RESIZE
-    ===================================================== */
-
-    window.addEventListener("resize", function () {
-
-        if (window.innerWidth > 768) {
-
-            closeNavigation();
-
-        }
-
-    });
-
+    document.body.appendChild(tabbar);
 }

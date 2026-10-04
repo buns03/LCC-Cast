@@ -5,6 +5,7 @@
 ========================================================= */
 
 const DEPARTMENT_API = "/superadmin/api/departments";
+let departmentsRunId = 0;
 
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -23,8 +24,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     initializeVotingType();
 
+    initializeDefaultSchoolYear();
+
     await loadCampuses();
     await loadExistingDepartments();
+    connectDepartmentsSocket();
 });
 
 const DEFAULT_POSITIONS = [
@@ -32,32 +36,59 @@ const DEFAULT_POSITIONS = [
     "Auditor", "PRO Internal", "PRO External"
 ];
 
+function sortMembersByPosition(members) {
+    return [...members].sort((a, b) => {
+        const posA = DEFAULT_POSITIONS.indexOf(a.position);
+        const posB = DEFAULT_POSITIONS.indexOf(b.position);
+        // Unknown/custom positions (e.g. "Member", "Others" text) fall after the known ones, keeping their relative order
+        const rankA = posA === -1 ? DEFAULT_POSITIONS.length : posA;
+        const rankB = posB === -1 ? DEFAULT_POSITIONS.length : posB;
+        return rankA - rankB;
+    });
+}
+
 let pendingDeleteCard = null;
 let pendingArchiveCard = null;
 let pendingSaveAction = null;
 let successToastTimeout = null;
 let discardToastTimeout = null;
 
+function getDefaultSchoolYear(referenceDate = new Date()) {
+  const year = referenceDate.getFullYear();
+  const month = referenceDate.getMonth(); // 0 = Jan ... 5 = June
+
+  const startYear = month >= 5 ? year : year - 1;
+
+  return `${startYear}-${startYear + 1}`;
+}
+
+function initializeDefaultSchoolYear() {
+    const schoolYearInput = document.getElementById("departmentsSchoolYear");
+    if (!schoolYearInput) return;
+
+    if (!schoolYearInput.value.trim()) {
+        schoolYearInput.value = getDefaultSchoolYear();
+    }
+}
+
 async function loadExistingDepartments() {
 
-    const list = document.querySelector("#existingDepartments .departments-list");
+     const list = document.querySelector("#existingDepartments .departments-list");
 
-    if (!list) return;
+        if (!list) return;
 
-    try {
+        const runId = ++departmentsRunId;
 
-        const response = await fetch(`${DEPARTMENT_API}`, {
-            method: "GET",
-            headers: {
-                "Accept": "application/json"
-            }
-        });
+        try {
 
-        if (!response.ok) {
-            throw new Error(`Failed to load departments: ${response.status}`);
-        }
-
-        const departments = await response.json();
+            const departments = await SoftCache.load(DEPARTMENT_API, {
+                ttl: 30000,
+                onRevalidated: () => {
+                    // don't wipe a card the user is currently editing
+                    if (document.querySelector("#existingDepartments .departments-item.editing")) return;
+                    loadExistingDepartments();
+                }
+            });
 
         list.innerHTML = "";
 
@@ -72,6 +103,8 @@ async function loadExistingDepartments() {
         }
 
         for (const department of departments) {
+
+            if (runId !== departmentsRunId) return; // a newer load took over
 
             const card = document.createElement("article");
 
@@ -283,6 +316,26 @@ async function loadExistingDepartments() {
     initializeDepartmentTitlePrefix();
 }
 
+function connectDepartmentsSocket() {
+  if (typeof StompJs === "undefined" || typeof SockJS === "undefined") {
+    console.error("StompJs/SockJS not loaded — real-time department updates disabled.");
+    return;
+  }
+
+  const client = new StompJs.Client({
+    webSocketFactory: () => new SockJS("/ws-analytics"),
+    reconnectDelay: 4000,
+    onConnect: () => {
+    client.subscribe("/topic/departments", () => {
+      SoftCache.clear();
+      loadExistingDepartments();
+    });
+    },
+  });
+
+  client.activate();
+}
+
 async function loadDepartmentMembers(card, departmentId) {
 
     const memberList = card.querySelector(".existing-member-list");
@@ -291,21 +344,11 @@ async function loadDepartmentMembers(card, departmentId) {
 
     try {
 
-        const response = await fetch(
+        const rawMembers = await SoftCache.load(
             `${DEPARTMENT_API}/${departmentId}/members`,
-            {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json"
-                }
-            }
+            { ttl: 30000 }
         );
-
-        if (!response.ok) {
-            throw new Error("Failed to load department members.");
-        }
-
-        const members = await response.json();
+        const members = Array.isArray(rawMembers) ? sortMembersByPosition(rawMembers) : rawMembers;
 
         memberList.innerHTML = "";
 
@@ -489,7 +532,7 @@ function showExistingMemberFile(memberElement, type) {
             message = "No background/COC uploaded.";
         }
 
-        alert(message);
+        showFileErrorToast(message);
         return;
     }
 
@@ -591,6 +634,7 @@ function showExistingMemberFile(memberElement, type) {
     `;
 
     document.body.appendChild(preview);
+    applyDocumentPreviewRatio(preview, type);
 
     const clickedButton =
         type === "campaign"
@@ -1106,8 +1150,10 @@ function showMemberFilePreview(row, type) {
             deleteMemberFile(row, type);
         });
 
+    applyDocumentPreviewRatio(preview, type);
+
     requestAnimationFrame(() => {
-        positionMemberFilePreview(row, preview);
+        positionMemberFilePreview(row, preview, type);
     });
 }
 
@@ -1763,6 +1809,11 @@ function resetCreateForm() {
 
     form.reset();
 
+    const schoolYearInput = document.getElementById("departmentsSchoolYear");
+        if (schoolYearInput) {
+            schoolYearInput.value = getDefaultSchoolYear();   // ADD THIS
+        }
+
     document.querySelectorAll("#createDepartments .departments-file-upload").forEach(upload => {
         const preview = upload.querySelector(".departments-file-preview");
         const button = upload.querySelector(".departments-file-btn");
@@ -2016,4 +2067,45 @@ function initializeVotingType() {
     votingType.addEventListener("change", updateVisibility);
 
     updateVisibility();
+}
+
+function showFileErrorToast(message) {
+    let toast = document.getElementById("fileErrorToast");
+
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "fileErrorToast";
+        toast.className = "success-toast error";
+
+        toast.innerHTML = `
+            <div class="success-toast-icon">
+                <i class="bi bi-exclamation-circle-fill"></i>
+            </div>
+
+            <div class="success-toast-content">
+                <strong>No File Uploaded</strong>
+                <span id="fileErrorToastMessage"></span>
+            </div>
+
+            <button
+                type="button"
+                class="success-toast-close"
+                id="fileErrorToastClose"
+                aria-label="Close notification">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        `;
+
+        document.body.appendChild(toast);
+
+        toast.querySelector("#fileErrorToastClose")
+            ?.addEventListener("click", () => toast.classList.remove("show"));
+    }
+
+    toast.querySelector("#fileErrorToastMessage").textContent = message;
+
+    requestAnimationFrame(() => toast.classList.add("show"));
+
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => toast.classList.remove("show"), 4000);
 }

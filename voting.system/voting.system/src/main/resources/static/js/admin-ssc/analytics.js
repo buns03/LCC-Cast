@@ -6,6 +6,8 @@
 document.addEventListener("DOMContentLoaded", initializeAnalytics);
 
 let analyticsData = null;
+let analyticsHistory = [];
+let selectedElectionId = null;
 const charts = {};
 let stompClient = null;
 const expandedElectionIds = new Set();
@@ -13,11 +15,82 @@ const expandedElectionIds = new Set();
 const ADMIN_CAMPUS_ID = document.body.dataset.adminCampusId || "";
 const ADMIN_CAMPUS_NAME = document.body.dataset.adminCampusName || "";
 
+const SSC_PROGRAMS = [
+  "BSIS", "BSHM", "BSCRIM", "BSPSYCH", "BSPSY", "EDUC",
+  "BSBA", "BAEL", "BSCE", "BSA", "BSAIS",
+];
+
 const SSC_PROGRAM_COLORS = {
   BSIS: "#5B5CEB", BSHM: "#22C55E", BSCRIM: "#EF4444", BSPSYCH: "#8E45F5",
-  EDUC: "#F59E0B", BSBA: "#06B6D4", BAEL: "#EC4899", BSCE: "#14B8A6",
-  BSA: "#748FEA", BSAIS: "#F97316",
+  BSPSY: "#8E45F5", EDUC: "#F59E0B", BSBA: "#06B6D4", BAEL: "#EC4899",
+  BSCE: "#14B8A6", BSA: "#748FEA", BSAIS: "#F97316",
 };
+
+const FALLBACK_PROGRAM_COLORS = ["#64748B", "#A855F7", "#0EA5E9", "#84CC16"];
+
+const SSC_CHART_TYPES = [
+  "sscPartylistChart",
+  "sscCandidateChart",
+  "sscTurnoutChart",
+  "sscYearChart",
+  "sscProgramChart",
+  "sscProgramNotVotedChart",
+  "sscActivityChart",
+];
+
+function getProgramRank(program) {
+  const i = SSC_PROGRAMS.indexOf(program);
+  return i === -1 ? 999 : i;
+}
+
+/* One shared program list so both pies have identical labels, order and colors. */
+function getProgramSeries(data) {
+  const voted = new Map();
+  const notVoted = new Map();
+
+  (data.programVotes || []).forEach((p) =>
+    voted.set(String(p.program).trim().toUpperCase(), p.votes),
+  );
+  (data.programNotVoted || []).forEach((p) =>
+    notVoted.set(String(p.program).trim().toUpperCase(), p.votes),
+  );
+
+  const programs = [...new Set([...voted.keys(), ...notVoted.keys()])].sort(
+    (a, b) => getProgramRank(a) - getProgramRank(b),
+  );
+
+  return {
+    programs,
+    voted: programs.map((p) => voted.get(p) ?? 0),
+    notVoted: programs.map((p) => notVoted.get(p) ?? 0),
+    colors: programs.map(
+      (p, i) =>
+        SSC_PROGRAM_COLORS[p] ||
+        FALLBACK_PROGRAM_COLORS[i % FALLBACK_PROGRAM_COLORS.length],
+    ),
+  };
+}
+
+const NO_CAMPUS_ELECTION_MESSAGE = "No active election for this campus yet.";
+
+function emptyCardMarkup(title, subtitle, message) {
+  return `
+    <div class="campus-election-section">
+        <div class="campus-election-header">
+            <div class="campus-election-title">
+                <i class="bi bi-geo-alt"></i>
+                <div>
+                    <h2>${escapeHtml(title)}</h2>
+                    <p>${escapeHtml(subtitle)}</p>
+                </div>
+            </div>
+        </div>
+        <div class="campus-election-list">
+            <p class="no-election-message">${escapeHtml(message)}</p>
+        </div>
+    </div>
+  `;
+}
 
 let successToast, successToastTitle, successToastMessage, successToastClose;
 let successToastTimer = null;
@@ -40,10 +113,32 @@ async function initializeAnalytics() {
   }
 }
 
-async function loadAnalyticsData() {
-  const res = await fetch("/admin-ssc/api/analytics", { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error("Failed to load analytics");
-  return res.json(); // flat CampusAnalytics
+let analyticsRevalidateTimer = null;
+
+function scheduleAnalyticsRefresh() {
+  clearTimeout(analyticsRevalidateTimer);
+  analyticsRevalidateTimer = setTimeout(async () => {
+    try {
+      const scrollY = window.scrollY;
+      analyticsData = await loadAnalyticsData();
+      renderSSC();
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
+    } catch (error) {
+      console.error("Failed to refresh analytics:", error);
+    }
+  }, 50);
+}
+
+async function loadAnalyticsData(force = false) {
+  const options = { force, onRevalidated: scheduleAnalyticsRefresh };
+
+  const [latest, history] = await Promise.all([
+    SoftCache.load("/admin-ssc/api/analytics", options),
+    SoftCache.load("/admin-ssc/api/analytics/history", options),
+  ]);
+
+  analyticsHistory = history;
+  return analyticsHistory.find((e) => e.electionId === selectedElectionId) || latest;
 }
 
 function connectAnalyticsSocket() {
@@ -59,7 +154,7 @@ function connectAnalyticsSocket() {
     stompClient.subscribe("/topic/analytics", async () => {
       try {
         const scrollY = window.scrollY;
-        analyticsData = await loadAnalyticsData();
+        analyticsData = await loadAnalyticsData(true);
         renderSSC();
         requestAnimationFrame(() => window.scrollTo(0, scrollY));
       } catch (error) {
@@ -100,14 +195,27 @@ function showAnalyticsContentSkeleton(container) {
 ========================================================= */
 
 function renderSSC() {
-  const container = document.getElementById("sscCampusAnalytics");
-  if (!container) return;
+      const container = document.getElementById("sscCampusAnalytics");
+      if (container) {
+        container.innerHTML = emptyCardMarkup(
+          ADMIN_CAMPUS_NAME,
+          "Supreme Student Council Elections",
+          "Unable to load analytics right now. Please refresh the page.",
+        );
+      }
 
   destroyChartsWithPrefix("ssc");
   container.innerHTML = "";
 
-  const data = analyticsData;
-  if (!data) return;
+    const data = analyticsData;
+    if (!data || !data.electionId) {
+      container.innerHTML = emptyCardMarkup(
+        ADMIN_CAMPUS_NAME,
+        "Supreme Student Council Elections",
+        NO_CAMPUS_ELECTION_MESSAGE,
+      );
+      return;
+    }
 
   const section = createCampusElectionSection(data);
   container.appendChild(section);
@@ -122,6 +230,16 @@ function createCampusElectionSection(data) {
     ? [{ id: data.electionId, title: data.electionTitle }]
     : [];
 
+    const yearSelector = analyticsHistory.length > 1 ? `
+      <div style="margin-left:auto">
+        <select id="sscElectionYearSelect">
+          ${analyticsHistory.map((e) => `
+            <option value="${escapeHtml(e.electionId)}" ${e.electionId === data.electionId ? "selected" : ""}>
+              ${escapeHtml(e.schoolYear || "—")} — ${escapeHtml(e.electionTitle)}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
+            </option>`).join("")}
+        </select>
+      </div>` : "";
+
   section.innerHTML = `
     <div class="campus-election-header">
         <div class="campus-election-title">
@@ -131,6 +249,7 @@ function createCampusElectionSection(data) {
                 <p>Supreme Student Council Elections</p>
             </div>
         </div>
+        ${yearSelector}
     </div>
 
     <div class="campus-election-list">
@@ -165,6 +284,13 @@ function createCampusElectionSection(data) {
             }).join("")}
     </div>
   `;
+
+  section.querySelector("#sscElectionYearSelect")?.addEventListener("change", (event) => {
+    selectedElectionId = event.target.value;
+    analyticsData = analyticsHistory.find((e) => e.electionId === selectedElectionId) || analyticsData;
+    expandedElectionIds.add(selectedElectionId);
+    renderSSC();
+  });
 
   initializeElectionActions(section);
   return section;
@@ -240,20 +366,32 @@ function createElectionGraphsMarkup() {
         </div>
     </div>
 
-    <div class="analytics-card">
-        <div class="analytics-card-header">
-            <div>
-                <h3>Votes per Program</h3>
-                <p>SSC votes cast by students from each program within this campus.</p>
+        <div class="analytics-two-column">
+            <div class="analytics-card">
+                <div class="analytics-card-header">
+                    <div>
+                        <h3>Votes per Program</h3>
+                        <p>Share of SSC votes cast by each program.</p>
+                    </div>
+                    <button class="graph-export-btn" data-export="sscProgramChart" title="Export Votes per Program"><i class="bi bi-download"></i></button>
+                </div>
+                <div class="chart-container chart-container-donut">
+                    <canvas id="sscProgramChart"></canvas>
+                </div>
             </div>
-            <button class="graph-export-btn" data-export="sscProgramChart" title="Export Votes per Program">
-                <i class="bi bi-download"></i>
-            </button>
+            <div class="analytics-card">
+                <div class="analytics-card-header">
+                    <div>
+                        <h3>Not Yet Voted per Program</h3>
+                        <p>Registered voters who have not voted, by program.</p>
+                    </div>
+                    <button class="graph-export-btn" data-export="sscProgramNotVotedChart" title="Export Not Yet Voted per Program"><i class="bi bi-download"></i></button>
+                </div>
+                <div class="chart-container chart-container-donut">
+                    <canvas id="sscProgramNotVotedChart"></canvas>
+                </div>
+            </div>
         </div>
-        <div class="chart-container ssc-program-chart">
-            <canvas id="sscProgramChart"></canvas>
-        </div>
-    </div>
 
     <div class="analytics-card">
         <div class="analytics-card-header">
@@ -304,6 +442,7 @@ function renderSSCCharts(data) {
   renderSSCYearChart(data);
   renderSSCActivityChart(data);
   renderSSCProgramChart(data);
+  renderSSCProgramNotVotedChart(data);
   renderCandidatePhotos("sscCandidatePhotos", data.candidates);
 }
 
@@ -332,15 +471,27 @@ function renderSSCYearChart(data) {
 }
 
 function renderSSCProgramChart(data) {
-  const programs = data.programVotes || [];
-  createOrUpdateChart("sscProgramChart", "bar",
-    programs.map((i) => i.program), programs.map((i) => i.votes),
-    {
-      title: "SSC Votes per Program",
-      description: "Number of SSC votes cast by students from each academic program.",
-      horizontal: true,
-      backgroundColor: programs.map((i) => SSC_PROGRAM_COLORS[i.program]),
-    });
+  const series = getProgramSeries(data);
+
+  createOrUpdateChart("sscProgramChart", "pie", series.programs, series.voted, {
+    title: "SSC Votes per Program",
+    description: "Share of SSC votes cast by each program.",
+    backgroundColor: series.colors,
+    legendPosition: "bottom",
+    unit: "votes",
+  });
+}
+
+function renderSSCProgramNotVotedChart(data) {
+  const series = getProgramSeries(data);
+
+  createOrUpdateChart("sscProgramNotVotedChart", "pie", series.programs, series.notVoted, {
+    title: "SSC Not Yet Voted per Program",
+    description: "Registered SSC voters who have not voted, by program.",
+    backgroundColor: series.colors,
+    legendPosition: "bottom",
+    unit: "not voted",
+  });
 }
 
 function renderSSCActivityChart(data) {
@@ -375,46 +526,122 @@ function createOrUpdateChart(canvasId, type, labels, values, options = {}) {
   if (!canvas) return;
 
   if (!labels || labels.length === 0) {
-    if (charts[canvasId]) { charts[canvasId].destroy(); delete charts[canvasId]; }
+    if (charts[canvasId]) {
+      charts[canvasId].destroy();
+      delete charts[canvasId];
+    }
     return;
   }
 
-  if (charts[canvasId]) charts[canvasId].destroy();
+  if (charts[canvasId]) {
+    charts[canvasId].destroy();
+  }
 
   const ctx = canvas.getContext("2d");
   const isHorizontal = options.horizontal === true;
+  const isCircular = type === "doughnut" || type === "pie";
+  const showPercent = options.showPercent ?? isCircular;
+  const unit = options.unit || "votes";
+  const useLabelLegend = options.legend === "labels" && !isCircular;
 
-  charts[canvasId] = new Chart(ctx, {
+  const chart = new Chart(ctx, {
     type,
     data: {
       labels,
-      datasets: [{
-        label: options.title || "",
-        data: values,
-        backgroundColor: options.backgroundColor || (type === "doughnut"
-          ? ["#748FEA", "#8E45F5", "#5B5CEB", "#22C55E", "#F59E0B", "#EF4444", "#06B6D4", "#EC4899"]
-          : "#748FEA"),
-        borderColor: type === "line" ? "#5B5CEB" : undefined,
-        borderWidth: type === "line" ? 2 : 1,
-        borderRadius: type === "bar" ? 6 : 0,
-        fill: type === "line" ? false : undefined,
-        tension: type === "line" ? 0.35 : 0,
-      }],
+      datasets: [
+        {
+          label: options.title || "",
+          data: values,
+          backgroundColor:
+            options.backgroundColor ||
+            (isCircular
+              ? [
+                  "#748FEA", "#8E45F5", "#5B5CEB", "#22C55E",
+                  "#F59E0B", "#EF4444", "#06B6D4", "#EC4899",
+                ]
+              : "#748FEA"),
+          borderColor: type === "line" ? "#5B5CEB" : isCircular ? "#FFFFFF" : undefined,
+          borderWidth: type === "line" ? 2 : isCircular ? 2 : 1,
+          borderRadius: type === "bar" ? 6 : 0,
+          fill: type === "line" ? false : undefined,
+          tension: type === "line" ? 0.35 : 0,
+        },
+      ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       indexAxis: isHorizontal ? "y" : "x",
       plugins: {
-        legend: { display: type === "doughnut", position: "right", labels: { font: { family: "Poppins", size: 12 }, padding: 14 } },
-        tooltip: { callbacks: { label: (context) => ` ${context.raw} votes` } },
+        legend: {
+          display: isCircular || useLabelLegend,
+          position: options.legendPosition || (isCircular ? "right" : "bottom"),
+          ...(useLabelLegend ? { onClick: () => {} } : {}),
+          labels: {
+            font: { family: "Poppins", size: 12 },
+            padding: 14,
+            ...(useLabelLegend
+              ? {
+                  generateLabels: (c) => {
+                    const colors = c.data.datasets[0].backgroundColor;
+                    return c.data.labels.map((label, i) => ({
+                      text: label,
+                      fillStyle: colors[i],
+                      strokeStyle: colors[i],
+                      lineWidth: 0,
+                      hidden: false,
+                      index: i,
+                      datasetIndex: 0,
+                    }));
+                  },
+                }
+              : {}),
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const value = Number(context.raw) || 0;
+
+              if (!showPercent) return ` ${value} ${unit}`;
+
+              const total = context.dataset.data.reduce(
+                (sum, v) => sum + (Number(v) || 0),
+                0,
+              );
+              const pct = total ? ((value / total) * 100).toFixed(1) : "0.0";
+              const prefix = isCircular ? `${context.label}: ` : "";
+
+              return ` ${prefix}${value} ${unit} (${pct}%)`;
+            },
+            footer: (items) => {
+              if (!showPercent || !items.length) return "";
+              const total = items[0].dataset.data.reduce(
+                (sum, v) => sum + (Number(v) || 0),
+                0,
+              );
+              return `Total: ${total}`;
+            },
+          },
+        },
       },
-      scales: type === "doughnut" ? {} : {
-        x: { beginAtZero: true, ticks: { font: { family: "Poppins", size: 11 } } },
-        y: { beginAtZero: true, ticks: { font: { family: "Poppins", size: 11 } } },
-      },
+      scales: isCircular
+        ? {}
+        : {
+            x: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { family: "Poppins", size: 11 } },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { family: "Poppins", size: 11 } },
+            },
+          },
     },
   });
+
+  chart.$showPercent = showPercent; // used by the PDF export
+  charts[canvasId] = chart;
 }
 
 function renderCandidatePhotos(containerId, candidates) {
@@ -514,7 +741,7 @@ async function exportAllSSCPDF() {
 
   if (analyticsData?.candidates?.length) renderSSCCharts(analyticsData);
 
-  const chartTypes = ["sscPartylistChart", "sscCandidateChart", "sscTurnoutChart", "sscYearChart", "sscProgramChart", "sscActivityChart"];
+    const chartTypes = SSC_CHART_TYPES;
 
   for (const chartType of chartTypes) {
     const chart = charts[chartType];
@@ -597,9 +824,14 @@ function addPDFFooter(pdf, label = "") {
 
 function addChartValuesToPDF(pdf, chart, startY) {
   let y = startY;
+
   const labels = chart.data.labels || [];
   const values = chart.data.datasets?.[0]?.data || [];
+
   if (!labels.length) return y;
+
+  const total = values.reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const showPercent = chart.$showPercent === true;
 
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(11);
@@ -611,10 +843,30 @@ function addChartValuesToPDF(pdf, chart, startY) {
 
   labels.forEach((label, index) => {
     const value = values[index] ?? 0;
-    if (y > 270) { pdf.addPage(); y = 20; }
-    pdf.text(`${label}: ${value}`, 20, y);
+    const pct = total ? ((value / total) * 100).toFixed(1) : "0.0";
+
+    if (y > 270) {
+      pdf.addPage();
+      y = 20;
+    }
+
+    pdf.text(
+      showPercent ? `${label}: ${value} (${pct}%)` : `${label}: ${value}`,
+      20,
+      y,
+    );
     y += 5;
   });
+
+  if (showPercent) {
+    if (y > 270) {
+      pdf.addPage();
+      y = 20;
+    }
+    pdf.setFont("helvetica", "bold");
+    pdf.text(`Total: ${total}`, 20, y);
+    y += 5;
+  }
 
   return y;
 }
@@ -627,6 +879,7 @@ function getChartTitle(chartId) {
     sscYearChart: "SSC Votes by Year Level",
     sscActivityChart: "SSC Voting Activity",
     sscProgramChart: "SSC Votes per Program",
+    sscProgramNotVotedChart: "SSC Not Yet Voted per Program",
   };
   return titles[chartId] || "LCCast Analytics";
 }
@@ -639,6 +892,7 @@ function getChartDescription(chartId) {
     sscYearChart: "Number of SSC voters who participated from each year level.",
     sscProgramChart: "Number of SSC votes cast by students from each academic program.",
     sscActivityChart: "Cumulative SSC voting activity throughout the election period.",
+    sscProgramNotVotedChart: "Registered SSC voters who have not yet voted, by program.",
   };
   return descriptions[chartId] || "";
 }

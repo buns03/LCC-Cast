@@ -54,4 +54,23 @@ public interface ElectionRepository extends JpaRepository<Election, UUID> {
             ElectionCategory category,
             RecordStatus status
     );
+
+    boolean existsByCategoryAndCampusIdAndSchoolYearAndStatusAndIdNot(
+            ElectionCategory category,
+            UUID campusId,
+            String schoolYear,
+            RecordStatus status,
+            UUID id
+    );
+
+    List<Election> findByCategoryAndCampusIdAndSchoolYearAndStatusAndIdNot(
+            ElectionCategory category,
+            UUID campusId,
+            String schoolYear,
+            RecordStatus status,
+            UUID id
+    );
+
+    List<Election> findByStatusAndDrawCheckedAtIsNullAndEndAtBefore(RecordStatus status, java.time.Instant cutoff);
+    boolean existsByParentElectionIdAndStatus(UUID parentElectionId, RecordStatus status);
 }

@@ -47,8 +47,12 @@ function createOrUpdateChart(canvasId, type, labels, values, options = {}) {
 
   const ctx = canvas.getContext("2d");
   const isHorizontal = options.horizontal === true;
+  const isCircular = type === "doughnut" || type === "pie";
+  const showPercent = options.showPercent ?? isCircular;
+  const unit = options.unit || "votes";
+  const useLabelLegend = options.legend === "labels" && !isCircular;
 
-  charts[canvasId] = new Chart(ctx, {
+  const chart = new Chart(ctx, {
     type,
     data: {
       labels,
@@ -58,20 +62,14 @@ function createOrUpdateChart(canvasId, type, labels, values, options = {}) {
           data: values,
           backgroundColor:
             options.backgroundColor ||
-            (type === "doughnut"
+            (isCircular
               ? [
-                  "#748FEA",
-                  "#8E45F5",
-                  "#5B5CEB",
-                  "#22C55E",
-                  "#F59E0B",
-                  "#EF4444",
-                  "#06B6D4",
-                  "#EC4899",
+                  "#748FEA", "#8E45F5", "#5B5CEB", "#22C55E",
+                  "#F59E0B", "#EF4444", "#06B6D4", "#EC4899",
                 ]
               : "#748FEA"),
-          borderColor: type === "line" ? "#5B5CEB" : undefined,
-          borderWidth: type === "line" ? 2 : 1,
+          borderColor: type === "line" ? "#5B5CEB" : isCircular ? "#FFFFFF" : undefined,
+          borderWidth: type === "line" ? 2 : isCircular ? 2 : 1,
           borderRadius: type === "bar" ? 6 : 0,
           fill: type === "line" ? false : undefined,
           tension: type === "line" ? 0.35 : 0,
@@ -84,31 +82,74 @@ function createOrUpdateChart(canvasId, type, labels, values, options = {}) {
       indexAxis: isHorizontal ? "y" : "x",
       plugins: {
         legend: {
-          display: type === "doughnut",
-          position: "right",
-          labels: { font: { family: "Poppins", size: 12 }, padding: 14 },
+          display: isCircular || useLabelLegend,
+          position: options.legendPosition || (isCircular ? "right" : "bottom"),
+          ...(useLabelLegend ? { onClick: () => {} } : {}),
+          labels: {
+            font: { family: "Poppins", size: 12 },
+            padding: 14,
+            ...(useLabelLegend
+              ? {
+                  generateLabels: (c) => {
+                    const colors = c.data.datasets[0].backgroundColor;
+                    return c.data.labels.map((label, i) => ({
+                      text: label,
+                      fillStyle: colors[i],
+                      strokeStyle: colors[i],
+                      lineWidth: 0,
+                      hidden: false,
+                      index: i,
+                      datasetIndex: 0,
+                    }));
+                  },
+                }
+              : {}),
+          },
         },
         tooltip: {
           callbacks: {
-            label: (context) => ` ${context.raw} votes`,
+            label: (context) => {
+              const value = Number(context.raw) || 0;
+
+              if (!showPercent) return ` ${value} ${unit}`;
+
+              const total = context.dataset.data.reduce(
+                (sum, v) => sum + (Number(v) || 0),
+                0,
+              );
+              const pct = total ? ((value / total) * 100).toFixed(1) : "0.0";
+              const prefix = isCircular ? `${context.label}: ` : "";
+
+              return ` ${prefix}${value} ${unit} (${pct}%)`;
+            },
+            footer: (items) => {
+              if (!showPercent || !items.length) return "";
+              const total = items[0].dataset.data.reduce(
+                (sum, v) => sum + (Number(v) || 0),
+                0,
+              );
+              return `Total: ${total}`;
+            },
           },
         },
       },
-      scales:
-        type === "doughnut"
-          ? {}
-          : {
-              x: {
-                beginAtZero: true,
-                ticks: { font: { family: "Poppins", size: 11 } },
-              },
-              y: {
-                beginAtZero: true,
-                ticks: { font: { family: "Poppins", size: 11 } },
-              },
+      scales: isCircular
+        ? {}
+        : {
+            x: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { family: "Poppins", size: 11 } },
             },
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0, font: { family: "Poppins", size: 11 } },
+            },
+          },
     },
   });
+
+  chart.$showPercent = showPercent; // used by the PDF export
+  charts[canvasId] = chart;
 }
 
 function destroyChartsWithPrefix(prefix) {
@@ -245,6 +286,9 @@ function addChartValuesToPDF(pdf, chart, startY) {
 
   if (!labels.length) return y;
 
+  const total = values.reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const showPercent = chart.$showPercent === true;
+
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(11);
   pdf.text("Labels and Values", 15, y);
@@ -255,15 +299,30 @@ function addChartValuesToPDF(pdf, chart, startY) {
 
   labels.forEach((label, index) => {
     const value = values[index] ?? 0;
+    const pct = total ? ((value / total) * 100).toFixed(1) : "0.0";
 
     if (y > 270) {
       pdf.addPage();
       y = 20;
     }
 
-    pdf.text(`${label}: ${value}`, 20, y);
+    pdf.text(
+      showPercent ? `${label}: ${value} (${pct}%)` : `${label}: ${value}`,
+      20,
+      y,
+    );
     y += 5;
   });
+
+  if (showPercent) {
+    if (y > 270) {
+      pdf.addPage();
+      y = 20;
+    }
+    pdf.setFont("helvetica", "bold");
+    pdf.text(`Total: ${total}`, 20, y);
+    y += 5;
+  }
 
   return y;
 }
@@ -361,6 +420,7 @@ document.addEventListener("DOMContentLoaded", initializeAnalytics);
 const charts = {};
 let stompClient = null;
 let currentData = null;
+let selectedElectionId = null;
 
 async function initializeAnalytics() {
   try {
@@ -375,14 +435,26 @@ async function initializeAnalytics() {
   } catch (error) {
     console.error("Failed to initialize analytics:", error);
     const container = document.getElementById("departmentCampusAnalytics");
-    if (container) container.innerHTML = `<p class="no-election-message">Unable to load analytics right now.</p>`;
+    if (container) {
+          container.innerHTML = renderDepartmentEmptyCard(
+            "Department",
+            "Department Elections",
+            "Unable to load analytics right now. Please refresh the page.",
+          );
+        }
   }
 }
 
-async function loadAndRenderAnalytics() {
-  const res = await fetch("/api/admin-dept/analytics");
-  if (!res.ok) throw new Error("Failed to load analytics");
-  currentData = await res.json();
+async function loadAndRenderAnalytics(force = false) {
+  currentData = await SoftCache.load("/api/admin-dept/analytics", {
+    force,
+    onRevalidated: (fresh) => {
+      const scrollY = window.scrollY;
+      currentData = fresh;
+      renderDepartmentAnalytics(currentData);
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
+    },
+  });
   renderDepartmentAnalytics(currentData);
 }
 
@@ -397,12 +469,57 @@ function connectAnalyticsSocket() {
     // Payload is the superadmin-wide shape; we just use the message as a refresh signal.
     stompClient.subscribe("/topic/analytics", async () => {
       const scrollY = window.scrollY;
-      await loadAndRenderAnalytics();
+      await loadAndRenderAnalytics(true);
       requestAnimationFrame(() => window.scrollTo(0, scrollY));
     });
   };
 
   stompClient.activate();
+}
+
+function renderDepartmentEmptyCard(titleName, subtitle, message) {
+  return `
+    <div class="campus-election-section">
+        <div class="campus-election-header">
+            <div class="campus-election-title">
+                <i class="bi bi-geo-alt"></i>
+                <div>
+                    <h2>${escapeHtml(titleName)}</h2>
+                    <p>${escapeHtml(subtitle)}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="campus-election-list">
+            <p class="no-election-message">${escapeHtml(message)}</p>
+        </div>
+    </div>
+  `;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function renderDepartmentSetupRequiredCard(message) {
+  return `
+    <div class="campus-election-section">
+        <div class="campus-election-header">
+            <div class="campus-election-title">
+                <i class="bi bi-exclamation-circle"></i>
+                <div>
+                    <h2>Setup Required</h2>
+                </div>
+            </div>
+        </div>
+
+        <div class="campus-election-list">
+            <p class="no-election-message">${escapeHtml(message)}</p>
+        </div>
+    </div>
+  `;
 }
 
 function renderDepartmentAnalytics(data) {
@@ -412,17 +529,28 @@ function renderDepartmentAnalytics(data) {
   if (!container) return;
   container.innerHTML = "";
 
-  if (!data || !data.departmentId) {
-    container.innerHTML = `<p class="no-election-message">Your department is not set up yet. Contact your superadmin.</p>`;
-    return;
-  }
+    if (!data || !data.departmentId || !data.hasActiveElection || !data.analytics) {
+      container.innerHTML = renderDepartmentEmptyCard(
+        data?.departmentTitle || data?.departmentName || "Department",
+        "Department Elections",
+        "No active election for your department yet.",
+      );
+      return;
+    }
 
-  if (!data.hasActiveElection || !data.analytics) {
-    container.innerHTML = `<p class="no-election-message">No active election for your department yet.</p>`;
-    return;
-  }
+  const history = data.history?.length ? data.history : [data.analytics];
+  const ca = history.find((e) => e.electionId === selectedElectionId) || history[0];
+  selectedElectionId = ca.electionId;
 
-  const ca = data.analytics;
+  const yearSelector = history.length > 1 ? `
+    <div style="margin-left:auto">
+      <select id="departmentElectionYearSelect">
+        ${history.map((e) => `
+          <option value="${e.electionId}" ${e.electionId === ca.electionId ? "selected" : ""}>
+            ${e.schoolYear || "—"} — ${e.electionTitle}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
+          </option>`).join("")}
+      </select>
+    </div>` : "";
 
   container.innerHTML = `
     <div class="campus-election-section">
@@ -434,6 +562,7 @@ function renderDepartmentAnalytics(data) {
                     <p>${data.departmentTitle || data.departmentName} Department Elections</p>
                 </div>
             </div>
+            ${yearSelector}
         </div>
 
         <div class="election-item expanded">
@@ -514,7 +643,7 @@ function renderDepartmentAnalytics(data) {
                         <h3>Voting Status</h3>
                         <button class="graph-export-btn" data-export="departmentStatusChart"><i class="bi bi-download"></i></button>
                     </div>
-                    <div class="chart-container chart-container-donut">
+                    <div class="chart-container">
                         <canvas id="departmentStatusChart"></canvas>
                     </div>
                 </div>
@@ -524,14 +653,19 @@ function renderDepartmentAnalytics(data) {
     </div>
   `;
 
+  container.querySelector("#departmentElectionYearSelect")?.addEventListener("change", (event) => {
+      selectedElectionId = event.target.value;
+      renderDepartmentAnalytics(currentData);
+    });
+
   createOrUpdateChart("departmentCandidateChart", "bar",
     ca.candidates.map(c => c.name), ca.candidates.map(c => c.votes),
     { title: "Department Officer Votes", horizontal: true });
 
-  const notVoted = Math.max(ca.totalVoters - ca.votesCast, 0);
-  createOrUpdateChart("departmentTurnoutChart", "doughnut",
-    ["Voted", "Not Yet Voted"], [ca.votesCast, notVoted],
-    { title: "Voter Turnout" });
+    const notVoted = Math.max(ca.totalVoters - ca.votesCast, 0);
+    createOrUpdateChart("departmentTurnoutChart", "doughnut",
+      ["Voted", "Not Yet Voted"], [ca.votesCast, notVoted],
+      { title: "Voter Turnout", unit: "voters" });
 
   createOrUpdateChart("departmentYearChart", "bar",
     ca.yearLevel.labels, ca.yearLevel.values,
@@ -541,9 +675,15 @@ function renderDepartmentAnalytics(data) {
     ca.activity.labels, ca.activity.values,
     { title: "Voting Activity" });
 
-  createOrUpdateChart("departmentStatusChart", "doughnut",
-    ca.status.labels, ca.status.values,
-    { title: "Voting Status" });
+    createOrUpdateChart("departmentStatusChart", "bar",
+      ["Voted", "Not Yet Voted"], [ca.votesCast ?? 0, notVoted],
+      {
+        title: "Voting Status",
+        backgroundColor: ["#22C55E", "#EF4444"],
+        legend: "labels",
+        showPercent: true,
+        unit: "voters",
+      });
 
   renderCandidatePhotos("departmentCandidatePhotos", ca.candidates);
 }

@@ -2,13 +2,7 @@ async function loadEditCampusOptions(select) {
     if (!select) return;
 
     try {
-        const response = await fetch("/superadmin/api/departments/campuses");
-
-        if (!response.ok) {
-            throw new Error("Failed to load campuses.");
-        }
-
-        const campuses = await response.json();
+        const campuses = await SoftCache.load("/superadmin/api/departments/campuses", { ttl: 300000 });
         const currentCampusId = select.dataset.campusId || "";
 
         select.innerHTML = `
@@ -38,21 +32,7 @@ async function loadCampuses() {
 
     try {
 
-        const response = await fetch(
-            `${DEPARTMENT_API}/campuses`,
-            {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json"
-                }
-            }
-        );
-
-        if (!response.ok) {
-            throw new Error("Failed to load campuses.");
-        }
-
-        const campuses = await response.json();
+        const campuses = await SoftCache.load(`${DEPARTMENT_API}/campuses`, { ttl: 300000 });
 
         campusSelect.innerHTML = `
             <option value="">Select Campus</option>

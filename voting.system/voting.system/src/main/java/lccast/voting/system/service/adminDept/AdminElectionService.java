@@ -131,7 +131,9 @@ public class AdminElectionService {
 
         assertCampusMatches(sessionCampusId, campusId);
         assertDepartmentsInScope(departmentIds, adminDepartmentCode);
-
+        if (!electionService.getById(id).isDrawElection()) {
+            assertDepartmentsInScope(departmentIds, adminDepartmentCode);
+        }
         Election saved = electionService.update(
                 id, title, ElectionCategory.DEPARTMENT, campusId, schoolYear,
                 startAt, endAt, List.of(), departmentIds, request
@@ -148,5 +150,12 @@ public class AdminElectionService {
     public void delete(UUID id, UUID sessionCampusId, String adminDepartmentCode, HttpServletRequest request) {
         getScopedById(id, sessionCampusId, adminDepartmentCode);
         electionService.delete(id, request);
+    }
+
+    public ElectionResponse scheduleDraw(UUID id, UUID sessionCampusId, String adminDepartmentCode,
+                                         java.time.Instant startAt, java.time.Instant endAt,
+                                         HttpServletRequest request) {
+        getScopedById(id, sessionCampusId, adminDepartmentCode);
+        return electionService.toResponse(electionService.scheduleDrawElection(id, startAt, endAt, request));
     }
 }

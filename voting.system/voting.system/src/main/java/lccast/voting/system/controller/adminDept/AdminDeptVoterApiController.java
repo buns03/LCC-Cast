@@ -80,7 +80,7 @@ public class AdminDeptVoterApiController {
 
         Map<UUID, UUID> departmentElectionIdByVoter = new HashMap<>();
         for (Voter voter : voters) {
-            voterDepartmentElectionService.resolveVisibleElection(voter)
+            voterDepartmentElectionService.resolveElectionForStatus(voter)
                     .ifPresent(election -> departmentElectionIdByVoter.put(voter.getId(), election.getId()));
         }
 
@@ -257,23 +257,52 @@ public class AdminDeptVoterApiController {
             return ResponseEntity.badRequest().body(Map.of("message", "The import file contains no voter records."));
         }
 
-        List<Map<String, Object>> scopedRows = rows.stream()
-                .map(row -> {
-                    Map<String, Object> copy = new HashMap<>(row);
-                    copy.put("campusId", scope.campusId().toString());
-                    copy.put("programCourse", scope.programCourse());
-                    return copy;
-                })
-                .toList();
+        String campusName = campusRepository.findById(scope.campusId())
+                .map(Campus::getName)
+                .orElse(null);
+
+        List<Map<String, Object>> scopedRows = new ArrayList<>();
+        List<String> skipErrors = new ArrayList<>();
+        int skippedForScopeMismatch = 0;
+
+        for (int i = 0; i < rows.size(); i++) {
+            Map<String, Object> row = rows.get(i);
+            int rowNumber = i + 2;
+
+            String rowCampus = stringValue(row.get("campus"));
+            String rowProgram = stringValue(row.get("programCourse"));
+
+            if (!rowCampus.isBlank() && campusName != null && !rowCampus.equalsIgnoreCase(campusName.trim())) {
+                skipErrors.add("Row " + rowNumber + ": Skipped — student belongs to campus \"" + rowCampus
+                        + "\", not your campus (\"" + campusName + "\").");
+                skippedForScopeMismatch++;
+                continue;
+            }
+
+            if (!rowProgram.isBlank() && !rowProgram.equalsIgnoreCase(scope.programCourse().trim())) {
+                skipErrors.add("Row " + rowNumber + ": Skipped — student belongs to course \"" + rowProgram
+                        + "\", not your department (\"" + scope.programCourse() + "\").");
+                skippedForScopeMismatch++;
+                continue;
+            }
+
+            Map<String, Object> copy = new HashMap<>(row);
+            copy.put("campusId", scope.campusId().toString());
+            copy.put("programCourse", scope.programCourse());
+            scopedRows.add(copy);
+        }
 
         VoterService.ImportResult result = voterService.importVoters(scopedRows, request);
+
+        List<String> combinedErrors = new ArrayList<>(skipErrors);
+        combinedErrors.addAll(result.errors());
 
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "added", result.added(),
                 "updated", result.updated(),
-                "skipped", result.skipped(),
-                "errors", result.errors()
+                "skipped", result.skipped() + skippedForScopeMismatch,
+                "errors", combinedErrors
         ));
     }
 
@@ -323,7 +352,7 @@ public class AdminDeptVoterApiController {
     private Map<String, Object> toResponse(Voter voter, Scope scope) {
 
         Map<UUID, UUID> departmentElectionIdByVoter = new HashMap<>();
-        voterDepartmentElectionService.resolveVisibleElection(voter)
+        voterDepartmentElectionService.resolveElectionForStatus(voter)
                 .ifPresent(election -> departmentElectionIdByVoter.put(voter.getId(), election.getId()));
 
         Set<UUID> relevantElectionIds = new HashSet<>(departmentElectionIdByVoter.values());
@@ -339,5 +368,189 @@ public class AdminDeptVoterApiController {
 
     private String stringValue(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    // =====================================================
+    // PAGINATED READ
+    // =====================================================
+
+    @GetMapping("/page")
+    public ResponseEntity<?> getVotersPage(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String yearLevel,
+            @RequestParam(required = false) String section,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String departmentStatus,
+            @RequestParam(defaultValue = "default") String nameSort,
+            @RequestParam(defaultValue = "default") String timeSort,
+            HttpSession session
+    ) {
+        Scope scope = requireScope(session);
+        var pageable = org.springframework.data.domain.PageRequest.of(page, size);
+
+        Boolean deptVoted = toVotedFlag(departmentStatus);
+        List<UUID> deptVotedIds = voterService.safeIdList(
+                deptVoted == null ? Set.of() : voterService.resolveDepartmentVotedVoterIds(
+                        scope.campusId(), List.of(scope.programCourse())));
+
+        var result = voterRepository.searchByCampusAndProgramWithVotingStatus(
+                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+                blankToNull(yearLevel), blankToNull(section),
+                blankToNull(search == null ? null : search.toLowerCase()),
+                deptVoted, deptVotedIds,
+                voterService.normalizeNameSort(nameSort), voterService.normalizeTimeSort(timeSort),
+                ElectionCategory.SSC,
+                pageable
+        );
+
+        List<Voter> voters = result.getContent();
+        Map<String, Object> body;
+
+        if (voters.isEmpty()) {
+            body = Map.of("content", List.of(), "totalElements", 0L, "totalPages", 0, "page", page);
+        } else {
+            Map<UUID, UUID> departmentElectionIdByVoter = new HashMap<>();
+            Map<String, Optional<Election>> electionCache = new HashMap<>();
+            for (Voter voter : voters) {
+                String key = voter.getCampusId() + "|" + voter.getProgramCourse();
+                Optional<Election> election = electionCache.computeIfAbsent(
+                        key, k -> voterDepartmentElectionService.resolveElectionForStatus(voter));
+                election.ifPresent(e -> departmentElectionIdByVoter.put(voter.getId(), e.getId()));
+            }
+
+            Set<UUID> relevantElectionIds = new HashSet<>(departmentElectionIdByVoter.values());
+            Map<String, VoteLog> voteLogByElectionAndVoter = relevantElectionIds.isEmpty()
+                    ? Map.of()
+                    : voteLogRepository.findByElectionIdIn(relevantElectionIds).stream()
+                    .collect(Collectors.toMap(
+                            vl -> vl.getElectionId() + "|" + vl.getVoterId(), vl -> vl, (a, b) -> a));
+
+            List<Map<String, Object>> content = voters.stream()
+                    .map(v -> buildVoterResponse(v, departmentElectionIdByVoter, voteLogByElectionAndVoter))
+                    .collect(Collectors.toList());
+
+            body = Map.of(
+                    "content", content,
+                    "totalElements", result.getTotalElements(),
+                    "totalPages", result.getTotalPages(),
+                    "page", page
+            );
+        }
+
+        return ResponseEntity.ok(body);
+    }
+
+    private Boolean toVotedFlag(String status) {
+        if (status == null || status.isBlank()) return null;
+        String s = status.trim().toLowerCase();
+        if (s.contains("not")) return Boolean.FALSE;
+        if (s.contains("voted")) return Boolean.TRUE;
+        return null;
+    }
+
+    // =====================================================
+    // FACETS
+    // =====================================================
+
+    @GetMapping("/facets")
+    public ResponseEntity<?> getVoterFacets(HttpSession session) {
+        Scope scope = requireScope(session);
+        return ResponseEntity.ok(Map.of(
+                "sections", voterRepository.findDistinctSectionsForDepartment(RecordStatus.ACTIVE, scope.campusId(), scope.programCourse()),
+                "yearLevels", voterRepository.findDistinctYearLevelsForDepartment(RecordStatus.ACTIVE, scope.campusId(), scope.programCourse())
+        ));
+    }
+
+    // =====================================================
+    // BULK BY FILTER
+    // =====================================================
+
+    public record VoterBulkFilter(String yearLevel, String section, String search) {}
+
+    @PatchMapping("/archive-matching")
+    public ResponseEntity<?> archiveAllMatching(
+            @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request
+    ) {
+        Scope scope = requireScope(session);
+        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgram(
+                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+                blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search())
+        );
+        if (ids.isEmpty()) return ResponseEntity.ok(Map.of("message", "No matching voters.", "count", 0));
+        int count = voterService.archiveVoters(ids, request);
+        return ResponseEntity.ok(Map.of("message", "Voters archived successfully.", "count", count));
+    }
+
+    @DeleteMapping("/delete-matching")
+    public ResponseEntity<?> deleteAllMatching(
+            @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request
+    ) {
+        Scope scope = requireScope(session);
+        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgram(
+                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+                blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search())
+        );
+        if (ids.isEmpty()) return ResponseEntity.ok(Map.of("message", "No matching voters.", "count", 0));
+        int count = voterService.deleteVoters(ids, request);
+        return ResponseEntity.ok(Map.of("message", "Voters moved to trash successfully.", "count", count));
+    }
+
+    // =====================================================
+    // EXPORT
+    // =====================================================
+
+    @GetMapping("/export")
+    public void exportVoters(
+            @RequestParam(required = false) String yearLevel,
+            @RequestParam(required = false) String section,
+            @RequestParam(required = false) String search,
+            HttpSession session,
+            jakarta.servlet.http.HttpServletResponse response
+    ) throws java.io.IOException {
+        Scope scope = requireScope(session);
+        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgram(
+                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+                blankToNull(yearLevel), blankToNull(section), blankToNull(search)
+        );
+
+        response.setContentType("text/csv;charset=UTF-8");
+        response.setHeader("Content-Disposition", "attachment; filename=\"lccast-voters.csv\"");
+        var writer = response.getWriter();
+        writer.write("Student ID,Full Name,Year Level,Section,Campus,Email,Department Voting Status,Department Time Voted\n");
+
+        if (!ids.isEmpty()) {
+            List<Voter> voters = voterRepository.findAllById(ids);
+            Map<UUID, UUID> departmentElectionIdByVoter = new HashMap<>();
+            for (Voter voter : voters) {
+                voterDepartmentElectionService.resolveElectionForStatus(voter)
+                        .ifPresent(e -> departmentElectionIdByVoter.put(voter.getId(), e.getId()));
+            }
+            Set<UUID> relevantElectionIds = new HashSet<>(departmentElectionIdByVoter.values());
+            Map<String, VoteLog> voteLogByElectionAndVoter = relevantElectionIds.isEmpty()
+                    ? Map.of()
+                    : voteLogRepository.findByElectionIdIn(relevantElectionIds).stream()
+                    .collect(Collectors.toMap(vl -> vl.getElectionId() + "|" + vl.getVoterId(), vl -> vl, (a, b) -> a));
+
+            java.util.function.Function<Object, String> esc = val ->
+                    "\"" + String.valueOf(val == null ? "" : val).replace("\"", "\"\"") + "\"";
+
+            for (Voter v : voters) {
+                Map<String, Object> row = buildVoterResponse(v, departmentElectionIdByVoter, voteLogByElectionAndVoter);
+                writer.write(esc.apply(row.get("studentId")) + "," +
+                        esc.apply(row.get("fullName")) + "," +
+                        esc.apply(row.get("yearLevel")) + "," +
+                        esc.apply(row.get("section")) + "," +
+                        esc.apply(row.get("campus")) + "," +
+                        esc.apply(row.get("email")) + "," +
+                        esc.apply(row.get("departmentVotingStatus")) + "," +
+                        esc.apply(row.get("departmentVotedAt")) + "\n");
+            }
+        }
+        writer.flush();
+    }
+
+    private String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
     }
 }

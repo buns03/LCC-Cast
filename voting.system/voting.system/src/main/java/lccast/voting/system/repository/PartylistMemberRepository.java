@@ -41,4 +41,7 @@ public interface PartylistMemberRepository
 
     List<PartylistMember> findAllByStudentId(String studentId);
 
+    boolean existsByStudentIdAndPartylistStatus(String studentId, RecordStatus status);
+
+
 }

@@ -11,6 +11,10 @@ import lccast.voting.system.event.VoteCastEvent;
 import lccast.voting.system.model.Campus;
 import lccast.voting.system.repository.CampusRepository;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +36,7 @@ public class VoteSubmissionService {
     private final ApplicationEventPublisher eventPublisher;
     private final CampusRepository campusRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private static final Logger log = LoggerFactory.getLogger(VoteSubmissionService.class);
 
     public VoteSubmissionService(
             SscElectionService sscElectionService,
@@ -80,6 +85,10 @@ public class VoteSubmissionService {
 
         if (election.getCategory() != ElectionCategory.SSC) {
             throw new IllegalArgumentException("This endpoint only accepts SSC election votes.");
+        }
+
+        if (election.getStatus() != RecordStatus.ACTIVE) {
+            throw new IllegalStateException("This election is no longer available.");
         }
 
         if (!election.getCampusId().equals(voter.getCampusId())) {
@@ -178,13 +187,15 @@ public class VoteSubmissionService {
         // ballot -> voter, which admin-facing code must never join)
         // =====================================================
 
+        List<BallotVote> rows = new java.util.ArrayList<>();
         for (Candidate candidate : validatedCandidates) {
             BallotVote ballotVote = new BallotVote();
             ballotVote.setBallot(savedBallot);
             ballotVote.setCandidate(candidate);
             ballotVote.setCreatedAt(now);
-            ballotVoteRepository.save(ballotVote);
+            rows.add(ballotVote);
         }
+        ballotVoteRepository.saveAll(rows);
 
         // =====================================================
         // AUDIT — records THAT the voter voted, not WHAT for
@@ -218,10 +229,7 @@ public class VoteSubmissionService {
                     return voteLogRepository.save(newVoteLog);
                 });
 
-        messagingTemplate.convertAndSend(
-                "/topic/history/vote-logs",
-                HistoryEventDTO.of("VOTE_CAST", voteLog.getId().toString())
-        );
+        notifyAfterCommit(voteLog.getId().toString());
 
         // =====================================================
         // UPDATE VOTER STATUS
@@ -242,8 +250,33 @@ public class VoteSubmissionService {
         response.setVotedAt(now);
         response.setMessage("Your vote has been successfully recorded.");
 
-        eventPublisher.publishEvent(new VoteCastEvent(this));
+
 
         return response;
+    }
+
+    private void notifyAfterCommit(String voteLogId) {
+        Runnable task = () -> {
+            try {
+                messagingTemplate.convertAndSend(
+                        "/topic/history/vote-logs",
+                        HistoryEventDTO.of("VOTE_CAST", voteLogId)
+                );
+                eventPublisher.publishEvent(new VoteCastEvent(VoteSubmissionService.this));
+            } catch (Exception e) {
+                log.warn("Post-commit vote notification failed", e);
+            }
+        };
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
     }
 }

@@ -49,7 +49,8 @@ public class AdminDeptLiveResultsService {
         if (campusId == null || adminDepartmentCode == null) return null;
 
         return departmentRepository.findByCampusIdAndStatus(campusId, RecordStatus.ACTIVE).stream()
-                .filter(d -> adminDepartmentCode.equalsIgnoreCase(DepartmentUtils.extractProgramCode(d)))
+                .filter(d -> adminDepartmentCode.equalsIgnoreCase(d.getName())
+                        || adminDepartmentCode.equalsIgnoreCase(DepartmentUtils.extractProgramCode(d)))
                 .max(Comparator.comparing(Department::getCreatedAt))
                 .map(Department::getId)
                 .orElse(null);

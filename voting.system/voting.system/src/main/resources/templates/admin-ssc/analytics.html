@@ -12,7 +12,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <title>LCCast - Analytics</title>
+    <title>LCC Cast | Analytics</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
 
     <!-- Bootstrap Icons -->
     <link
@@ -56,7 +60,7 @@ MOBILE NAVIGATION OVERLAY
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
         <div class="logo">
-            <img src="/images/lcccast_logo.png" alt="LCCast" />
+            <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
             <h2 >LCC Cast</h2>
         </div>
@@ -161,23 +165,6 @@ MOBILE NAVIGATION OVERLAY
         </div>
     </header>
 
-    <!-- =====================================================
-       ANALYTICS NAVIGATION
-  ====================================================== -->
-
-    <div class="analytics-tabs">
-        <button type="button" class="analytics-tab active" data-section="ssc">
-            <i class="bi bi-bank"></i>
-
-            Supreme Student Council
-        </button>
-
-        <button type="button" class="analytics-tab" data-section="department">
-            <i class="bi bi-building"></i>
-
-            Department Elections
-        </button>
-    </div>
 
         <!-- SSC CAMPUS FILTER -->
 
@@ -194,7 +181,7 @@ MOBILE NAVIGATION OVERLAY
                 <select id="sscCampusSelector">
                     <option value="all">All Campuses</option>
 
-                    <option value="college">College</option>
+                    <option value="kaypian">Kaypian</option>
 
                     <option value="muzon">Muzon</option>
 
@@ -205,95 +192,7 @@ MOBILE NAVIGATION OVERLAY
         <!-- SSC CAMPUS ANALYTICS -->
 
         <div id="sscCampusAnalytics"></div>
-    </section>
 
-    <!-- =====================================================
-       DEPARTMENT ANALYTICS
-  ====================================================== -->
-
-    <section id="departmentAnalytics" class="analytics-section">
-        <div class="analytics-section-header">
-            <div>
-                <h2>Department Elections</h2>
-
-                <p>Analytics for department officer elections</p>
-            </div>
-
-            <button type="button" class="export-all-btn" id="exportDepartment">
-                <i class="bi bi-download"></i>
-
-                Download Department Graphs
-            </button>
-        </div>
-
-        <!-- DEPARTMENT SELECTOR -->
-
-        <!-- DEPARTMENT + CAMPUS SELECTORS -->
-
-        <div class="department-selector-card">
-            <div class="selector-group">
-                <span class="selector-label"> Select Department </span>
-
-                <p>Department analytics are displayed separately.</p>
-
-                <div class="department-select-wrapper">
-                    <i class="bi bi-building"></i>
-
-                    <select id="departmentSelector">
-                        <!-- 
-                                    <option value="ALL">
-                                        All Departments
-                                    </option> -->
-
-                        <option value="BSA">BSA — Accountancy</option>
-
-                        <option value="BSBA">BSBA — Business Administration</option>
-
-                        <option value="BAEL">BAEL — Communication Arts</option>
-
-                        <option value="BSCRIM">BSCRIM — Criminology</option>
-
-                        <option value="BSCE">BSCE — Engineering</option>
-
-                        <option value="BSHM">BSHM — Hospitality Management</option>
-
-                        <option value="BSIS">BSIS — Information Systems</option>
-
-                        <option value="BSPSY">BSPSY — Psychology</option>
-
-                        <option value="EDUC">EDUC — Teacher Education</option>
-
-                        <option value="BSAIS">
-                            BSAIS — Accountancy Information Systems
-                        </option>
-                    </select>
-                </div>
-            </div>
-
-            <!-- CAMPUS -->
-
-            <div class="selector-group campus-selector-group">
-                <span class="selector-label"> Select Campus </span>
-
-                <p>View department analytics by campus.</p>
-
-                <div class="campus-select-wrapper">
-                    <i class="bi bi-geo-alt"></i>
-
-                    <select id="departmentCampusSelector">
-                        <option value="all">All Campuses</option>
-
-                        <option value="college">College</option>
-
-                        <option value="muzon">Muzon</option>
-
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <div id="departmentCampusAnalytics"></div>
-    </section>
 </main>
 
 <!-- =========================================================
@@ -309,7 +208,7 @@ MOBILE NAVIGATION OVERLAY
 
             <h2>Logout?</h2>
 
-            <p>Are you sure you want to logout from LCCast?</p>
+            <p>Are you sure you want to logout from LCC Cast?</p>
         </div>
 
         <div class="modal-footer">
@@ -376,6 +275,7 @@ MOBILE NAVIGATION OVERLAY
 ========================================================= -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="/js/superadmin/soft-cache.js"></script>
 <script src="/js/navigation.js"></script>
 
 <!-- Analytics JS -->

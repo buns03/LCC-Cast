@@ -1,6 +1,8 @@
 package lccast.voting.system.service.student;
 
 import lccast.voting.system.dto.student.CandidateResponse;
+import lccast.voting.system.dto.student.PartylistCandidatesResponse;
+import lccast.voting.system.dto.student.PartylistMemberResponse;
 import lccast.voting.system.dto.student.PositionResponse;
 import lccast.voting.system.dto.student.SscElectionResponse;
 import lccast.voting.system.model.*;
@@ -10,12 +12,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
-import java.util.LinkedHashMap;
 
 @Service
 public class SscElectionService {
@@ -47,6 +45,7 @@ public class SscElectionService {
     // =====================================================
 
     public ElectionPhase computePhase(Election election) {
+        if (election.getStartAt() == null || election.getEndAt() == null) return ElectionPhase.UNSCHEDULED;
         Instant now = Instant.now();
 
         Instant visibleFrom = election.getStartAt()
@@ -81,12 +80,13 @@ public class SscElectionService {
 
         // Prefer an UPCOMING or ONGOING election if one exists.
         Optional<Election> active = candidates.stream()
-                .filter(election -> {
-                    ElectionPhase phase = computePhase(election);
-                    return phase == ElectionPhase.UPCOMING
-                            || phase == ElectionPhase.ONGOING;
+                .filter(e -> {
+                    ElectionPhase p = computePhase(e);
+                    return p == ElectionPhase.UPCOMING || p == ElectionPhase.ONGOING;
                 })
-                .findFirst();
+                .min(java.util.Comparator
+                        .comparing((Election e) -> computePhase(e) == ElectionPhase.ONGOING ? 0 : 1)
+                        .thenComparing(Election::getStartAt));
 
         if (active.isPresent()) {
             return active;
@@ -141,6 +141,8 @@ public class SscElectionService {
         List<Candidate> candidates =
                 candidateRepository.findByElectionId(election.getId());
 
+        Map<UUID, String> partylistNames = loadPartylistNames(candidates);
+
         Map<String, List<Candidate>> grouped = candidates.stream()
                 .collect(Collectors.groupingBy(
                         Candidate::getPosition,
@@ -154,7 +156,7 @@ public class SscElectionService {
                     positionResponse.setName(entry.getKey());
                     positionResponse.setCandidates(
                             entry.getValue().stream()
-                                    .map(this::toCandidateResponse)
+                                    .map(c -> toCandidateResponse(c, partylistNames))
                                     .toList()
                     );
                     return positionResponse;
@@ -163,6 +165,11 @@ public class SscElectionService {
 
         response.setPositions(positions);
 
+        // Used by the "View Candidates" modal — groups the same
+        // candidate list by partylist instead of by position, and
+        // attaches each partylist's poster/logo.
+        response.setPartylists(buildPartylistBreakdown(candidates));
+
         return response;
     }
 
@@ -170,7 +177,7 @@ public class SscElectionService {
 // MAP A SINGLE CANDIDATE
 // =====================================================
 
-    private CandidateResponse toCandidateResponse(Candidate candidate) {
+    private CandidateResponse toCandidateResponse(Candidate candidate, Map<UUID, String> partylistNames) {
 
         CandidateResponse response = new CandidateResponse();
 
@@ -184,13 +191,9 @@ public class SscElectionService {
 
         response.setFullName(fullName.trim());
 
-        String partylistName = null;
-
-        if (candidate.getPartylistId() != null) {
-            partylistName = partylistRepository.findById(candidate.getPartylistId())
-                    .map(Partylist::getName)
-                    .orElse(null);
-        }
+        String partylistName = candidate.getPartylistId() != null
+                ? partylistNames.get(candidate.getPartylistId())
+                : null;
 
         response.setPartylistName(partylistName);
         response.setPhotoImageUrl(candidate.getPhotoImageUrl());
@@ -198,5 +201,76 @@ public class SscElectionService {
         response.setBackgroundImageUrl(candidate.getBackgroundImageUrl());
 
         return response;
+    }
+
+    // =====================================================
+    // BUILD PARTYLIST -> MEMBERS BREAKDOWN (for View Candidates)
+    // =====================================================
+
+    private List<PartylistCandidatesResponse> buildPartylistBreakdown(List<Candidate> candidates) {
+
+        Map<UUID, List<Candidate>> byPartylist = candidates.stream()
+                .filter(candidate -> candidate.getPartylistId() != null)
+                .collect(Collectors.groupingBy(
+                        Candidate::getPartylistId,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+
+        if (byPartylist.isEmpty()) return List.of();
+
+        Map<UUID, Partylist> partylistsById = partylistRepository.findAllById(byPartylist.keySet())
+                .stream()
+                .collect(Collectors.toMap(Partylist::getId, p -> p));
+
+        return byPartylist.entrySet().stream()
+                .map(entry -> {
+                    UUID partylistId = entry.getKey();
+                    Partylist partylist = partylistsById.get(partylistId);
+
+                    PartylistCandidatesResponse response = new PartylistCandidatesResponse();
+                    response.setId(partylistId);
+                    response.setName(partylist != null ? partylist.getName() : "Partylist");
+                    response.setPosterImageUrl(partylist != null ? partylist.getPosterImageUrl() : null);
+                    response.setLogoImageUrl(partylist != null ? partylist.getPosterLogoUrl() : null);
+                    response.setMembers(
+                            entry.getValue().stream()
+                                    .map(this::toPartylistMemberResponse)
+                                    .toList()
+                    );
+                    return response;
+                })
+                .toList();
+    }
+
+    private PartylistMemberResponse toPartylistMemberResponse(Candidate candidate) {
+
+        PartylistMemberResponse response = new PartylistMemberResponse();
+
+        String fullName = candidate.getFirstName()
+                + (candidate.getMiddleName() != null && !candidate.getMiddleName().isBlank()
+                ? " " + candidate.getMiddleName()
+                : "")
+                + " " + candidate.getLastName();
+
+        response.setPosition(candidate.getPosition());
+        response.setName(fullName.trim());
+        response.setPhotoImageUrl(candidate.getPhotoImageUrl());
+        response.setCampaignImageUrl(candidate.getCampaignImageUrl());
+        response.setBackgroundImageUrl(candidate.getBackgroundImageUrl());
+
+        return response;
+    }
+
+    private Map<UUID, String> loadPartylistNames(List<Candidate> candidates) {
+        Set<UUID> ids = candidates.stream()
+                .map(Candidate::getPartylistId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        if (ids.isEmpty()) return Map.of();
+
+        return partylistRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Partylist::getId, Partylist::getName));
     }
 }

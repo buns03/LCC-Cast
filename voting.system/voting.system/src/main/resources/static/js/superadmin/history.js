@@ -18,6 +18,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   loadVoteLogFilterOptions();
 
+  loadActionFilterOptions();
+
   // Data fetches
   fetchVoteLogs(1);
   fetchActions(1);
@@ -61,9 +63,7 @@ function buildQuery(params) {
 }
 
 async function apiGet(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`GET ${path} failed: ${response.status}`);
-  return response.json();
+  return SoftCache.load(path, { ttl: 20000, swr: false });
 }
 
 /* ==========================================================
@@ -82,18 +82,22 @@ function connectHistorySocket() {
     webSocketFactory: () => new SockJS("/ws-analytics"),
     reconnectDelay: 4000,
     onConnect: () => {
-      historyStompClient.subscribe("/topic/history/vote-logs", () =>
-        fetchVoteLogs(historyPageState.voteLogs),
-      );
-      historyStompClient.subscribe("/topic/history/actions", () =>
-        fetchActions(historyPageState.actions),
-      );
-      historyStompClient.subscribe("/topic/history/archives", () =>
-        fetchArchives(historyPageState.archives),
-      );
-      historyStompClient.subscribe("/topic/history/trash", () =>
-        fetchTrash(historyPageState.trash),
-      );
+        historyStompClient.subscribe("/topic/history/vote-logs", () => {
+          SoftCache.clear();
+          fetchVoteLogs(historyPageState.voteLogs);
+        });
+        historyStompClient.subscribe("/topic/history/actions", () => {
+          SoftCache.clear();
+          fetchActions(historyPageState.actions);
+        });
+        historyStompClient.subscribe("/topic/history/archives", () => {
+          SoftCache.clear();
+          fetchArchives(historyPageState.archives);
+        });
+        historyStompClient.subscribe("/topic/history/trash", () => {
+          SoftCache.clear();
+          fetchTrash(historyPageState.trash);
+        });
     },
     onStompError: (frame) => {
       console.error("STOMP error", frame);
@@ -116,7 +120,7 @@ renderHistoryTableSkeleton("voteLogsTable", 9);
     const campusId = document.getElementById("voteCampusFilter")?.value || "";
     const sort = document.getElementById("voteSortFilter")?.value || "time-down";
 
-    const query = buildQuery({ search, program, section, year, category, campusId, sort, page });
+    const query = buildQuery({ ...getVoteLogSearchParams(search), program, section, year, category, campusId, sort, all: true });
 
   try {
     const data = await apiGet(`/superadmin/api/history/vote-logs?${query}`);
@@ -167,7 +171,7 @@ renderHistoryCardSkeleton("trashList");
 }
 
 async function fetchActions(page = historyPageState.actions) {
-renderHistoryTableSkeleton("actionsTable", 6);
+renderHistoryTableSkeleton("actionsTable", 5);
   const search = document.getElementById("actionSearch")?.value.trim() || "";
   const role = document.getElementById("actionRoleFilter")?.value || "";
   const action = document.getElementById("actionTypeFilter")?.value || "";
@@ -1262,6 +1266,22 @@ function buildHistoryReferenceNumber(record) {
   return `VS-${prefix}-${shortId}`;
 }
 
+// Reference IDs look like VS-SSC-1A2B3C4D / VS-DEPT-1A2B3C4D.
+// The last part is the first 8 hex chars of the ballot UUID (dashes removed),
+// so the server can match it as a ballot ID prefix.
+function getVoteLogSearchParams(rawSearch) {
+  const search = (rawSearch || "").trim();
+
+  if (!/^VS-/i.test(search)) return { search };
+
+  const code = (search.split("-")[2] || "")
+    .replace(/[^0-9a-f]/gi, "")
+    .toLowerCase();
+
+  // "VS-SSC-" typed so far, with no code yet: don't filter anything
+  return code ? { ballotRef: code } : {};
+}
+
 function formatDateTime(isoString) {
   if (!isoString) return "";
   const date = new Date(isoString);
@@ -1329,45 +1349,34 @@ function renderActions(items) {
 
   tbody.innerHTML = items
     .map((record) => {
-      const hasDetails = Array.isArray(record.details) && record.details.length > 0;
       const badge = getActionBadgeInfo(record.action);
+      const actionClass = record.actionClass || badge.class;
+      const icon = record.icon || badge.icon;
 
       return `
             <tr class="history-row" data-id="${record.id}">
                 <td>
                     <div class="history-user">
-                        <div class="history-avatar">${record.initials}</div>
+                        <div class="history-avatar">${escapeActionDetailsHTML(record.initials)}</div>
                         <div>
                             <strong>${escapeActionDetailsHTML(record.user)}</strong>
                             <small>${escapeActionDetailsHTML(record.role)}</small>
                         </div>
                     </div>
                 </td>
-                <td><span class="role-badge ${record.roleClass}">${escapeActionDetailsHTML(record.role)}</span></td>
+                <td><span class="role-badge ${record.roleClass || ""}">${escapeActionDetailsHTML(record.role)}</span></td>
                 <td>
-                    <span class="action-badge ${record.actionClass}">
-                        <i class="bi ${record.icon}"></i>
+                    <span class="action-badge ${actionClass}">
+                        <i class="bi ${icon}"></i>
                         ${escapeActionDetailsHTML(record.action)}
                     </span>
                 </td>
                 <td><div class="action-description"><span>${escapeActionDetailsHTML(record.description)}</span></div></td>
                 <td>${formatDateTime(record.createdAt)}</td>
-                <td>
-                    ${
-                      hasDetails
-                        ? `<button type="button" class="action-details-btn" data-action-id="${record.id}">
-                                <i class="bi bi-eye"></i> View Details
-                           </button>`
-                        : `<span class="action-no-details">—</span>`
-                    }
-                </td>
             </tr>
         `;
     })
     .join("");
-
-  // Re-bind, since these buttons are recreated on every render
-  bindActionDetailsButtons();
 }
 
 const ENTITY_ICONS = {
@@ -1467,6 +1476,37 @@ function renderTrash(items) {
     .join("");
 
   bindHistoryTrashActions();
+}
+
+function formatActionLabel(value) {
+  return String(value || "")
+    .toLowerCase()
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+async function loadActionFilterOptions() {
+  const select = document.getElementById("actionTypeFilter");
+  if (!select) return;
+
+  try {
+    const values = await apiGet(`/superadmin/api/history/actions/filter-options`, { ttl: 300000 });
+    const previous = select.value;
+
+    select.innerHTML =
+      `<option value="">All Actions</option>` +
+      (values || [])
+        .map(
+          (v) =>
+            `<option value="${escapeActionDetailsHTML(v)}">${escapeActionDetailsHTML(formatActionLabel(v))}</option>`,
+        )
+        .join("");
+
+    if ((values || []).includes(previous)) select.value = previous;
+  } catch (err) {
+    console.error("Failed to load action filter options", err);
+  }
 }
 
 async function loadVoteLogFilterOptions() {
@@ -1757,7 +1797,9 @@ function initializeArchiveViewActions() {
   });
 }
 
-function openArchiveViewModal(record) {
+let archiveViewRequestId = 0;
+
+async function openArchiveViewModal(record) {
   const setText = (id, text) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
@@ -1765,11 +1807,48 @@ function openArchiveViewModal(record) {
 
   setText("archiveViewTitle", record.entityName || "Archived Record");
   setText("archiveViewType", record.entityType || "Archive");
-  setText("archiveViewDescription", record.description || "No description available.");
   setText("archiveViewDate", record.archivedAt ? formatDateTime(record.archivedAt) : "—");
   setText("archiveViewBy", record.archivedBy || "Unknown user");
 
+  const details = document.getElementById("archiveViewDescription");
+  if (details) details.textContent = "Loading details...";
+
   document.getElementById("historyArchiveViewModal")?.classList.add("show");
+
+  const requestId = ++archiveViewRequestId;
+
+  try {
+    const res = await fetch(`/superadmin/api/history/archives/${record.id}/details`, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`Details failed: ${res.status}`);
+    const data = await res.json();
+
+    if (requestId !== archiveViewRequestId || !details) return; // another record was opened meanwhile
+
+    const fields = Array.isArray(data.fields) ? data.fields : [];
+
+    if (!fields.length) {
+      details.textContent = "No details available for this record.";
+      return;
+    }
+
+    details.innerHTML = `
+      <dl class="archive-details-list">
+        ${fields
+          .map(
+            (f) => `
+          <div class="archive-details-row">
+            <dt>${escapeActionDetailsHTML(f.label)}</dt>
+            <dd>${escapeActionDetailsHTML(f.value)}</dd>
+          </div>`,
+          )
+          .join("")}
+      </dl>`;
+  } catch (err) {
+    console.error("Failed to load archive details", err);
+    if (requestId === archiveViewRequestId && details) {
+      details.textContent = "Could not load details for this record.";
+    }
+  }
 }
 
 function closeArchiveViewModal() {

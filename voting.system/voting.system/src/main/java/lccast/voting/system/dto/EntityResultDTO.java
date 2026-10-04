@@ -30,6 +30,12 @@ public class EntityResultDTO {
     private String departmentId;
     private List<String> departmentIds = new ArrayList<>();
 
+    private String schoolYear;
+    private boolean drawElection;
+    private String parentElectionId;
+    private List<String> drawPositions = new ArrayList<>();
+    private String drawMessage;
+
     public EntityResultDTO(
             String id,
             String key,
@@ -123,4 +129,15 @@ public class EntityResultDTO {
     public void setDepartmentIds(List<String> departmentIds) {
         this.departmentIds = departmentIds;
     }
+
+    public String getSchoolYear() { return schoolYear; }
+    public void setSchoolYear(String v) { this.schoolYear = v; }
+    public boolean isDrawElection() { return drawElection; }
+    public void setDrawElection(boolean v) { this.drawElection = v; }
+    public String getParentElectionId() { return parentElectionId; }
+    public void setParentElectionId(String v) { this.parentElectionId = v; }
+    public List<String> getDrawPositions() { return drawPositions; }
+    public void setDrawPositions(List<String> v) { this.drawPositions = v; }
+    public String getDrawMessage() { return drawMessage; }
+    public void setDrawMessage(String v) { this.drawMessage = v; }
 }

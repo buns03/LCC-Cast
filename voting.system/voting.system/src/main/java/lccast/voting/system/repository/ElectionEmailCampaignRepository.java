@@ -15,4 +15,6 @@ public interface ElectionEmailCampaignRepository extends JpaRepository<ElectionE
 
     List<ElectionEmailCampaign> findByStatusAndScheduledAtLessThanEqual(
             String status, Instant now);
+
+    boolean existsByElectionIdAndSendType(UUID electionId, String sendType);
 }

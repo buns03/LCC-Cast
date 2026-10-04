@@ -612,4 +612,29 @@ UTILITY CLASSES
     }
 
     h2{
-        font-size:19p
+        font-size:19px;
+    }
+
+    h3{
+        font-size:16px;
+    }
+
+    h4{
+        font-size:14px;
+    }
+
+    h5{
+        font-size:13px;
+    }
+
+    p{
+        font-size:12px;
+    }
+
+    button,
+    input,
+    textarea,
+    select{
+        font-size:12px;
+    }
+}

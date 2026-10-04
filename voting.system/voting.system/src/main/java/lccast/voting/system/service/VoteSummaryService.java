@@ -42,6 +42,14 @@ public class VoteSummaryService {
             List<VoteSummaryDTO> summaries = new ArrayList<>();
 
             for (Ballot ballot : ballots) {
+                Election election = ballot.getElection();
+
+                // hide the summary once the election is archived or trashed —
+                // permanently-deleted elections already remove the ballot row itself
+                if (election == null || election.getStatus() != RecordStatus.ACTIVE) {
+                    continue;
+                }
+
                 summaries.add(toSummaryDTO(ballot));
             }
 

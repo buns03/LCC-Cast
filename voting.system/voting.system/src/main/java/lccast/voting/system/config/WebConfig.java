@@ -12,6 +12,12 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new MustChangePasswordInterceptor())
                 .addPathPatterns("/**")
-                .excludePathPatterns("/login", "/css/**", "/js/**");
+                .excludePathPatterns(
+                        "/login",
+                        "/css/**",
+                        "/js/**",
+                        "/images/**",
+                        "/favicon.ico"
+                );
     }
 }

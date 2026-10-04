@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpSession;
 import lccast.voting.system.model.AuditAction;
 import lccast.voting.system.service.AuditLogService;
 import lccast.voting.system.service.CandidatePortalService;
+import lccast.voting.system.service.CandidatePortalService.CandidateType;
 import lccast.voting.system.service.SupabaseStorageService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,16 +42,31 @@ public class CandidatePortalApiController {
     }
 
     // ==================================================
-    // PERSONAL INFORMATION
+    // CANDIDACY STATUS — drives which tabs the UI shows
     // ==================================================
 
-    @GetMapping("/personal-info")
-    public ResponseEntity<?> getPersonalInfo(HttpSession session) {
+    @GetMapping("/candidacy-status")
+    public ResponseEntity<?> getCandidacyStatus(HttpSession session) {
         UUID authUserId = requireAuthUserId(session);
-        var record = candidatePortalService.findRecordByAuthUserId(authUserId);
+        var status = candidatePortalService.getCandidacyStatus(authUserId);
+        return ResponseEntity.ok(Map.of("ssc", status.ssc, "department", status.department));
+    }
 
+    // ==================================================
+    // PERSONAL INFORMATION (per candidate type)
+    // ==================================================
+
+    @GetMapping("/{type}/personal-info")
+    public ResponseEntity<?> getPersonalInfo(@PathVariable String type, HttpSession session) {
+        UUID authUserId = requireAuthUserId(session);
+        CandidateType candidateType = parseType(type);
+
+        var record = candidatePortalService.findRecordByAuthUserId(authUserId, candidateType);
         if (record == null) {
-            return ResponseEntity.status(404).body(Map.of("message", "No candidate record found."));
+            return ResponseEntity.status(404).body(Map.of(
+                    "message", candidateType == CandidateType.SSC
+                            ? "You are not currently an SSC candidate."
+                            : "You are not currently a department candidate."));
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -67,32 +83,36 @@ public class CandidatePortalApiController {
         return ResponseEntity.ok(body);
     }
 
-    @PostMapping("/personal-info/photo")
-    public ResponseEntity<?> uploadPhoto(@RequestParam("file") MultipartFile file, HttpSession session, HttpServletRequest request) {
-        return handleUpload("photo", file, session, request);
+    @PostMapping("/{type}/personal-info/photo")
+    public ResponseEntity<?> uploadPhoto(@PathVariable String type, @RequestParam("file") MultipartFile file,
+                                         HttpSession session, HttpServletRequest request) {
+        return handleUpload(parseType(type), "photo", file, session, request);
     }
 
-    @PostMapping("/personal-info/background")
-    public ResponseEntity<?> uploadBackground(@RequestParam("file") MultipartFile file, HttpSession session, HttpServletRequest request) {
-        return handleUpload("background", file, session, request);
+    @PostMapping("/{type}/personal-info/background")
+    public ResponseEntity<?> uploadBackground(@PathVariable String type, @RequestParam("file") MultipartFile file,
+                                              HttpSession session, HttpServletRequest request) {
+        return handleUpload(parseType(type), "background", file, session, request);
     }
 
-    @PostMapping("/personal-info/campaign")
-    public ResponseEntity<?> uploadCampaign(@RequestParam("file") MultipartFile file, HttpSession session, HttpServletRequest request) {
-        return handleUpload("campaign", file, session, request);
+    @PostMapping("/{type}/personal-info/campaign")
+    public ResponseEntity<?> uploadCampaign(@PathVariable String type, @RequestParam("file") MultipartFile file,
+                                            HttpSession session, HttpServletRequest request) {
+        return handleUpload(parseType(type), "campaign", file, session, request);
     }
 
-    private ResponseEntity<?> handleUpload(String type, MultipartFile file, HttpSession session, HttpServletRequest request) {
+    private ResponseEntity<?> handleUpload(CandidateType candidateType, String imageType, MultipartFile file,
+                                           HttpSession session, HttpServletRequest request) {
         UUID authUserId = requireAuthUserId(session);
         try {
-            String storagePath = candidatePortalService.uploadPersonalImage(authUserId, type, file);
+            String storagePath = candidatePortalService.uploadPersonalImage(authUserId, candidateType, imageType, file);
 
-            var record = candidatePortalService.findRecordByAuthUserId(authUserId);
+            var record = candidatePortalService.findRecordByAuthUserId(authUserId, candidateType);
             if (record != null) {
                 auditLogService.log(request, AuditAction.UPDATE,
-                        "CANDIDATE_" + type.toUpperCase() + "_IMAGE", record.id,
-                        "updated their " + type + " image.",
-                        Map.of("imageType", type, "studentId", record.studentId));
+                        "CANDIDATE_" + candidateType.name() + "_" + imageType.toUpperCase() + "_IMAGE", record.id,
+                        "updated their " + candidateType.name().toLowerCase() + " " + imageType + " image.",
+                        Map.of("imageType", imageType, "candidateType", candidateType.name(), "studentId", record.studentId));
             }
 
             Map<String, Object> body = new LinkedHashMap<>();
@@ -110,12 +130,13 @@ public class CandidatePortalApiController {
     // GROUP (PARTYLIST / DEPARTMENT) INFORMATION
     // ==================================================
 
-    @GetMapping("/group-info")
-    public ResponseEntity<?> getGroupInfo(HttpSession session) {
+    @GetMapping("/{type}/group-info")
+    public ResponseEntity<?> getGroupInfo(@PathVariable String type, HttpSession session) {
         UUID authUserId = requireAuthUserId(session);
+        CandidateType candidateType = parseType(type);
 
         try {
-            var info = candidatePortalService.getGroupInfo(authUserId);
+            var info = candidatePortalService.getGroupInfo(authUserId, candidateType);
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("groupType", info.groupType);
@@ -140,20 +161,25 @@ public class CandidatePortalApiController {
         }
     }
 
-    @PostMapping(value = "/group-info", consumes = "multipart/form-data")
+    @PostMapping(value = "/{type}/group-info", consumes = "multipart/form-data")
     public ResponseEntity<?> updateGroupInfo(
+            @PathVariable String type,
             @RequestParam(required = false) String description,
             @RequestParam(required = false) MultipartFile poster,
             @RequestParam(required = false) MultipartFile logo,
             HttpSession session, HttpServletRequest request) {
 
         UUID authUserId = requireAuthUserId(session);
-        try {
-            candidatePortalService.updateGroupInfo(authUserId, description, poster, logo);
+        CandidateType candidateType = parseType(type);
 
-            var record = candidatePortalService.findRecordByAuthUserId(authUserId);
-            UUID groupId = record != null ? (record.partylistId != null ? record.partylistId : record.departmentId) : null;
-            String groupType = record != null && record.partylistId != null ? "PARTYLIST" : "DEPARTMENT";
+        try {
+            candidatePortalService.updateGroupInfo(authUserId, candidateType, description, poster, logo);
+
+            var record = candidatePortalService.findRecordByAuthUserId(authUserId, candidateType);
+            UUID groupId = record != null
+                    ? (candidateType == CandidateType.SSC ? record.partylistId : record.departmentId)
+                    : null;
+            String groupType = candidateType == CandidateType.SSC ? "PARTYLIST" : "DEPARTMENT";
 
             auditLogService.log(request, AuditAction.UPDATE, groupType, groupId,
                     "updated the " + groupType.toLowerCase() + " information.",
@@ -174,6 +200,12 @@ public class CandidatePortalApiController {
     // ==================================================
     // HELPERS
     // ==================================================
+
+    private CandidateType parseType(String type) {
+        if ("ssc".equalsIgnoreCase(type)) return CandidateType.SSC;
+        if ("department".equalsIgnoreCase(type)) return CandidateType.DEPARTMENT;
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid candidate type. Use 'ssc' or 'department'.");
+    }
 
     private String fileUrl(String storagePath) {
         if (storagePath == null || storagePath.isBlank()) return null;

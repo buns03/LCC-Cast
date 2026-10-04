@@ -22,6 +22,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   initializeDiscardElection();
 
   initializeElectionEmailModal();
+  initializeDefaultSchoolYear();
+  connectElectionsSocket();
 });
 
 /* ==========================================================
@@ -36,6 +38,16 @@ function showFieldError(field, message) {
   formGroup.classList.add("has-error");
   const error = formGroup.querySelector(".selection-error");
   if (error) error.textContent = message;
+}
+
+function initializeDefaultSchoolYear() {
+  const schoolYearEl = $("electionSchoolYear");
+  if (!schoolYearEl) return;
+
+  // Only auto-fill if empty, so a reload never clobbers something typed
+  if (!schoolYearEl.value.trim()) {
+    schoolYearEl.value = getDefaultSchoolYear();
+  }
 }
 
 function clearFieldError(field) {
@@ -81,6 +93,35 @@ function clearContainer(container, placeholder) {
   container.innerHTML = `
     <span class="placeholder">${placeholder}</span>
   `;
+}
+
+function getDefaultSchoolYear(referenceDate = new Date()) {
+  const year = referenceDate.getFullYear();
+  const month = referenceDate.getMonth(); // 0 = Jan ... 5 = June
+
+  const startYear = month >= 5 ? year : year - 1;
+
+  return `${startYear}-${startYear + 1}`;
+}
+
+function connectElectionsSocket() {
+  if (typeof StompJs === "undefined" || typeof SockJS === "undefined") {
+    console.error("StompJs/SockJS not loaded — real-time election updates disabled.");
+    return;
+  }
+
+  const client = new StompJs.Client({
+    webSocketFactory: () => new SockJS("/ws-analytics"),
+    reconnectDelay: 4000,
+    onConnect: () => {
+      client.subscribe("/topic/elections", () => {
+          SoftCache.clear();
+          loadExistingElectionsFromApi();
+        });
+    },
+  });
+
+  client.activate();
 }
 
 function escapeHtml(value) {
@@ -386,18 +427,13 @@ async function loadExistingElectionsFromApi(showLoading = false) {
   }
 
   try {
-    const response = await fetch("/superadmin/api/elections", {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
+    const elections = await SoftCache.load("/superadmin/api/elections", {
+      ttl: 30000,
+      onRevalidated: () => {
+        if (document.querySelector("#existingElections .election-item.editing")) return;
+        loadExistingElectionsFromApi();
       },
     });
-
-    if (!response.ok) {
-      throw new Error(`Failed to load elections: ${response.status}`);
-    }
-
-    const elections = await response.json();
 
     console.log("Loaded elections:", elections);
 
@@ -431,7 +467,7 @@ if (!container) return;
 container.innerHTML = "";
 
 if (!elections || elections.length === 0) {
-container.innerHTML = `       <div class="election-empty">
+container.innerHTML = `       <div class="empty-state">
         No elections found.       </div>
     `;
 return;
@@ -684,13 +720,13 @@ card.innerHTML = `
               value="62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8"
               ${
                 election.campusId === "62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8" ||
-                election.campusName === "College" ||
-                election.campus?.name === "College"
+                election.campusName === "Kaypian" ||
+                election.campus?.name === "Kaypian"
                   ? "selected"
                   : ""
               }
             >
-              College
+              Kaypian
             </option>
 
             <option
@@ -1294,30 +1330,10 @@ async function initializeSelectionModal() {
 
   async function loadSelectionData() {
     try {
-      const [partylistResponse, departmentResponse] = await Promise.all([
-        fetch("/superadmin/api/partylists", {
-          headers: {
-            Accept: "application/json",
-          },
-        }),
-
-        fetch("/superadmin/api/departments", {
-          headers: {
-            Accept: "application/json",
-          },
-        }),
-      ]);
-
-      if (!partylistResponse.ok) {
-        throw new Error("Failed to load partylists.");
-      }
-
-      if (!departmentResponse.ok) {
-        throw new Error("Failed to load departments.");
-      }
-
-      partylistData = await partylistResponse.json();
-      departmentData = await departmentResponse.json();
+        [partylistData, departmentData] = await Promise.all([
+          SoftCache.load("/superadmin/api/partylists", { ttl: 30000 }),
+          SoftCache.load("/superadmin/api/departments", { ttl: 30000 }),
+        ]);
 
         database.partylist = partylistData.map((item) => ({
           id: item.id,
@@ -2039,6 +2055,8 @@ function initializeCreateElectionSave() {
               $("electionCampus").value = fixedCampusId;
             }
 
+            $("electionSchoolYear").value = getDefaultSchoolYear();
+
             clearContainer(
               $("selectedDepartment"),
               "No departments selected.",
@@ -2125,6 +2143,8 @@ function initializeDiscardElection() {
           if (campusSelect && adminCampusId) {
             campusSelect.value = adminCampusId;
           }
+
+          $("electionSchoolYear").value = getDefaultSchoolYear();
 
           clearContainer($("selectedDepartment"), "No departments selected.");
 

@@ -7,7 +7,11 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
 
-  <title>Settings | LCCast</title>
+  <title>LCC Cast | Settings</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+  <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
 
   <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" href="/css/voter/layout.css" />
@@ -16,6 +20,7 @@
   <link rel="stylesheet" href="/css/modal.css" />
   <link rel="stylesheet" href="/css/navigation.css" />
   <link rel="stylesheet" href="/css/voter/voter-settings.css" />
+  <link rel="stylesheet" href="/css/password-rules.css" />
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
 </head>
@@ -30,7 +35,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-top">
     <div class="logo">
-      <img src="/images/lcccast_logo.png" alt="LCCast" />
+      <img src="/images/lcccast_logo.png" alt="LCC Cast" />
       <h2>LCC Cast</h2>
     </div>
 
@@ -45,6 +50,21 @@
       <a href="/candidate/partylist-information">
         <i class="bi bi-people"></i>
         <span>Partylist Information</span>
+      </a>
+      <hr />
+      <a href="/voter/ssc-election">
+        <i class="bi bi-calendar-event"></i>
+        <span>SSC Election</span>
+      </a>
+
+      <a href="/voter/department-election">
+        <i class="bi bi-building"></i>
+        <span>Department Election</span>
+      </a>
+
+      <a href="/voter/vote-summaries">
+        <i class="bi bi-bar-chart"></i>
+        <span>Vote Summaries</span>
       </a>
     </nav>
   </div>
@@ -139,6 +159,7 @@
                       <i class="bi bi-eye"></i>
                     </button>
                   </div>
+                  <small id="newPasswordStrength" class="password-strength-message"></small>
                   <small class="field-error">Please enter a new password.</small>
                 </div>
 
@@ -179,7 +200,7 @@
     <div class="delete-modal-content">
       <div class="delete-modal-icon"><i class="bi bi-box-arrow-right"></i></div>
       <h2>Logout?</h2>
-      <p>Are you sure you want to logout from LCCast?</p>
+      <p>Are you sure you want to logout from LCC Cast?</p>
     </div>
     <div class="modal-footer">
       <button type="button" class="logout-cancel-btn" id="cancelLogout">Cancel</button>
@@ -226,9 +247,10 @@
     <i class="bi bi-x-lg"></i>
   </button>
 </div>
-
+<script src="/js/superadmin/soft-cache.js"></script>
 <script src="/js/navigation.js"></script>
 <script src="/js/logout.js"></script>
+<script src="/js/password-rules.js"></script>
 <script src="/js/candidate/candidate-settings.js"></script>
 </body>
 </html>

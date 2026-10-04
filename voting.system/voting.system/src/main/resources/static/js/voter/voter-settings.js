@@ -35,6 +35,12 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   });
 
+  wirePasswordStrengthFeedback({
+      passwordInputId: "newPassword",
+      feedbackId: "newPasswordStrength",
+      getButtons: () => [document.getElementById("saveVoterSettings")]
+    });
+
   // =====================================================
   // PASSWORD VISIBILITY TOGGLE (eye icons)
   // =====================================================
@@ -119,12 +125,14 @@ document.addEventListener("DOMContentLoaded", function () {
       setFieldError(currentInput, false);
     }
 
-    if (newPass === "") {
-      setFieldError(newInput, true);
-      valid = false;
-    } else {
-      setFieldError(newInput, false);
-    }
+        if (newPass === "") {
+          setFieldError(newInput, true);
+          valid = false;
+        } else {
+          const feedback = getPasswordFeedback(newPass);
+          setFieldError(newInput, !feedback.valid);
+          if (!feedback.valid) valid = false;
+        }
 
     const confirmGroup = confirmInput.closest(".form-group");
 
@@ -170,17 +178,20 @@ document.addEventListener("DOMContentLoaded", function () {
   // =====================================================
   const voterProfileForm = document.getElementById("voterProfileForm");
 
-  voterProfileForm.addEventListener("submit", function (event) {
-    event.preventDefault();
+    voterProfileForm.addEventListener("submit", function (event) {
+      event.preventDefault();
 
-    const isValid = validateVoterSettingsForm();
+      const isValid = validateVoterSettingsForm();
 
-    if (!isValid) {
-      return;
-    }
+      if (!isValid) {
+        return;
+      }
 
-    openModal("saveVoterSettingsModal");
-  });
+      const saveBtn = document.getElementById("saveVoterSettings");
+      if (saveBtn && saveBtn.disabled) return;
+
+      openModal("saveVoterSettingsModal");
+    });
 
   const cancelSaveBtn = document.getElementById("cancelSaveVoterSettings");
 

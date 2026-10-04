@@ -40,6 +40,107 @@ public class SuperadminVoterApiController {
         return ResponseEntity.ok(voterService.toResponseList(voters));
     }
 
+    @GetMapping("/page")
+    public ResponseEntity<?> getVotersPage(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) UUID campusId,
+            @RequestParam(required = false) String program,
+            @RequestParam(required = false) String yearLevel,
+            @RequestParam(required = false) String section,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String sscStatus,
+            @RequestParam(required = false) String departmentStatus,
+            @RequestParam(defaultValue = "default") String nameSort,
+            @RequestParam(defaultValue = "default") String timeSort
+    ) {
+        var pageable = org.springframework.data.domain.PageRequest.of(page, size);
+
+        Boolean sscVoted = toVotedFlag(sscStatus);
+        Boolean deptVoted = toVotedFlag(departmentStatus);
+
+        List<UUID> sscVotedIds = voterService.safeIdList(
+                sscVoted == null ? Set.of() : voterService.resolveSscVotedVoterIds(campusId));
+        List<UUID> deptVotedIds = voterService.safeIdList(
+                deptVoted == null ? Set.of() : voterService.resolveDepartmentVotedVoterIds(
+                        campusId, program == null ? null : List.of(program)));
+
+        var result = voterRepository.searchWithVotingStatus(
+                RecordStatus.ACTIVE, campusId, blankToNull(program), blankToNull(yearLevel),
+                blankToNull(section), blankToNull(search == null ? null : search.toLowerCase()),
+                sscVoted, sscVotedIds, deptVoted, deptVotedIds,
+                voterService.normalizeNameSort(nameSort), voterService.normalizeTimeSort(timeSort),
+                true, true, ElectionCategory.SSC,
+                pageable
+        );
+
+        return ResponseEntity.ok(Map.of(
+                "content", voterService.toResponseList(result.getContent()),
+                "totalElements", result.getTotalElements(),
+                "totalPages", result.getTotalPages(),
+                "page", page
+        ));
+    }
+
+    private Boolean toVotedFlag(String status) {
+        if (status == null || status.isBlank()) return null;
+        String s = status.trim().toLowerCase();
+        if (s.contains("not")) return Boolean.FALSE;
+        if (s.contains("voted")) return Boolean.TRUE;
+        return null;
+    }
+
+    @GetMapping("/facets")
+    public ResponseEntity<?> getVoterFacets(
+            @RequestParam(required = false) UUID campusId,
+            @RequestParam(required = false) List<String> program
+    ) {
+        List<String> sections;
+        if (program == null || program.isEmpty()) {
+            sections = voterRepository.findDistinctSections(RecordStatus.ACTIVE, campusId, (String) null);
+        } else if (program.size() == 1) {
+            sections = voterRepository.findDistinctSections(RecordStatus.ACTIVE, campusId, program.get(0));
+        } else {
+            sections = voterRepository.findDistinctSectionsForPrograms(RecordStatus.ACTIVE, campusId, program);
+        }
+        return ResponseEntity.ok(Map.of(
+                "programs", voterRepository.findDistinctPrograms(RecordStatus.ACTIVE, campusId),
+                "sections", sections
+        ));
+    }
+
+    public record VoterBulkFilter(UUID campusId, String program, String yearLevel, String section, String search) {}
+
+    @PatchMapping("/archive-matching")
+    public ResponseEntity<?> archiveAllMatching(@RequestBody VoterBulkFilter filter, HttpServletRequest request) {
+        List<UUID> ids = voterRepository.findIdsMatching(
+                RecordStatus.ACTIVE, filter.campusId(), blankToNull(filter.program()),
+                blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search())
+        );
+        if (ids.isEmpty()) {
+            return ResponseEntity.ok(Map.of("message", "No matching voters.", "count", 0));
+        }
+        int count = voterService.archiveVoters(ids, request);
+        return ResponseEntity.ok(Map.of("message", "Voters archived successfully.", "count", count));
+    }
+
+    @DeleteMapping("/delete-matching")
+    public ResponseEntity<?> deleteAllMatching(@RequestBody VoterBulkFilter filter, HttpServletRequest request) {
+        List<UUID> ids = voterRepository.findIdsMatching(
+                RecordStatus.ACTIVE, filter.campusId(), blankToNull(filter.program()),
+                blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search())
+        );
+        if (ids.isEmpty()) {
+            return ResponseEntity.ok(Map.of("message", "No matching voters.", "count", 0));
+        }
+        int count = voterService.deleteVoters(ids, request);
+        return ResponseEntity.ok(Map.of("message", "Voters moved to trash successfully.", "count", count));
+    }
+
+    private String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
 // =========================================================
 // GET VOTER BY STUDENT ID
 // =========================================================
@@ -375,6 +476,48 @@ public class SuperadminVoterApiController {
                         "errors", result.errors()
                 )
         );
+    }
+
+    @GetMapping("/export")
+    public void exportVoters(
+            @RequestParam(required = false) UUID campusId,
+            @RequestParam(required = false) String program,
+            @RequestParam(required = false) String yearLevel,
+            @RequestParam(required = false) String section,
+            @RequestParam(required = false) String search,
+            jakarta.servlet.http.HttpServletResponse response
+    ) throws java.io.IOException {
+        List<UUID> ids = voterRepository.findIdsMatching(
+                RecordStatus.ACTIVE, campusId, blankToNull(program), blankToNull(yearLevel),
+                blankToNull(section), blankToNull(search)
+        );
+        List<Map<String, Object>> rows = ids.isEmpty()
+                ? List.of()
+                : voterService.toResponseList(voterRepository.findAllById(ids));
+
+        response.setContentType("text/csv;charset=UTF-8");
+        response.setHeader("Content-Disposition", "attachment; filename=\"lccast-voters.csv\"");
+
+        var writer = response.getWriter();
+        writer.write("Student ID,Full Name,Course,Year Level,Section,Campus,Email,SSC Voting Status,SSC Time Voted,Department Voting Status,Department Time Voted\n");
+
+        java.util.function.Function<Object, String> esc = val ->
+                "\"" + String.valueOf(val == null ? "" : val).replace("\"", "\"\"") + "\"";
+
+        for (Map<String, Object> v : rows) {
+            writer.write(esc.apply(v.get("studentId")) + "," +
+                    esc.apply(v.get("fullName")) + "," +
+                    esc.apply(v.get("programCourse")) + "," +
+                    esc.apply(v.get("yearLevel")) + "," +
+                    esc.apply(v.get("section")) + "," +
+                    esc.apply(v.get("campus")) + "," +
+                    esc.apply(v.get("email")) + "," +
+                    esc.apply(v.get("sscVotingStatus")) + "," +
+                    esc.apply(v.get("sscVotedAt")) + "," +
+                    esc.apply(v.get("departmentVotingStatus")) + "," +
+                    esc.apply(v.get("departmentVotedAt")) + "\n");
+        }
+        writer.flush();
     }
 
 }

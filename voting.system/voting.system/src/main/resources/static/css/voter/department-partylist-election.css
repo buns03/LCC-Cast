@@ -429,11 +429,8 @@
 
 .candidate-actions {
     display: grid;
-
     grid-template-columns: 1fr 1fr;
-
     gap: 9px;
-
     padding: 9px 17px 17px;
 }
 
@@ -532,6 +529,56 @@
     color: var(--primary);
 }
 
+/* ==========================================================
+   CLEAR SELECTION BUTTON
+========================================================== */
+
+.candidate-clear-btn {
+    display: none;
+
+    grid-column: 1 / -1;
+
+    width: 100%;
+    height: 36px;
+
+    padding: 0 12px;
+
+    align-items: center;
+    justify-content: center;
+
+    gap: 7px;
+
+    border: 1px solid var(--border);
+    border-radius: 10px;
+
+    background: #fafafa;
+    color: var(--muted);
+
+    font-family: inherit;
+
+    font-size: 12px;
+    font-weight: 600;
+
+    cursor: pointer;
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease;
+}
+
+.candidate-card.selected .candidate-clear-btn {
+    display: flex;
+}
+
+.candidate-clear-btn:hover {
+    background: #fef2f2;
+
+    border-color: #f87171;
+
+    color: #dc2626;
+}
+
 
 /* ==========================================================
    REVIEW VOTE BUTTON
@@ -539,7 +586,10 @@
 
 .election-action {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
+
+    gap: 12px;
 
     padding-top: 2px;
 }
@@ -578,6 +628,48 @@
     background: var(--primary-hover);
 
     transform: translateY(-1px);
+}
+
+/* ==========================================================
+   CLEAR ALL BUTTON
+========================================================== */
+
+.election-action .secondary-btn {
+    height: 48px;
+
+    padding: 0 20px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    gap: 8px;
+
+    border: 1px solid var(--border);
+    border-radius: 12px;
+
+    background: #ffffff;
+    color: var(--text);
+
+    font-family: inherit;
+
+    font-size: 14px;
+    font-weight: 600;
+
+    cursor: pointer;
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease;
+}
+
+.election-action .secondary-btn:hover {
+    background: #fef2f2;
+
+    border-color: #f87171;
+
+    color: #dc2626;
 }
 
 
@@ -1073,9 +1165,8 @@
         padding: 26px 22px 40px;
     }
 
-    .voter-page-content .page-header h2 {
-        font-size: 25px;
-    }
+    voter-page-content .page-header h2 { font-size: 22px; }
+        .voter-page-content .page-header p  { font-size: 13px; }
 
     .election-position {
         padding: 20px;
@@ -1118,9 +1209,8 @@
         margin-bottom: 22px;
     }
 
-    .voter-page-content .page-header h2 {
-        font-size: 23px;
-    }
+    .voter-page-content .page-header h2 { font-size: 20px; }
+        .voter-page-content .page-header p  { font-size: 12.5px; }
 
     .election-content {
         gap: 18px;
@@ -1217,8 +1307,18 @@
     }
 
     .candidate-select-btn,
-    .candidate-campaign-btn {
+    .candidate-campaign-btn,
+    .candidate-clear-btn {
         height: 38px;
+    }
+
+    .election-action {
+        flex-direction: column-reverse;
+    }
+
+    .election-action .primary-btn,
+    .election-action .secondary-btn {
+        width: 100%;
     }
 
 
@@ -1276,6 +1376,30 @@
         width: 100%;
     }
 
+    .election-info-content h3 {
+        font-size: 15px;
+    }
+
+    .election-instructions h3 {
+        font-size: 14px;
+    }
+
+    .position-title h3 {
+        font-size: 15px;
+    }
+
+    .campaign-modal-header h2 {
+        font-size: 17px;
+    }
+
+    .review-vote-modal .modal-header h2 {
+        font-size: 17px;
+    }
+
+    .review-vote-modal .modal-header p {
+        font-size: 12px;
+    }
+
 }
 
 
@@ -1289,8 +1413,11 @@
         padding: 18px 14px 30px;
     }
 
-    .voter-page-content .page-header h2 {
-        font-size: 21px;
+    .voter-page-content .page-header h2 { font-size: 18px; }
+    .voter-page-content .page-header p  { font-size: 12px; }
+
+    .vote-thank-you h2 {
+        font-size: 20px;
     }
 
     .election-info-card {
@@ -1362,11 +1489,10 @@
         font-size: 13px;
     }
 
-    .election-action .primary-btn {
+    .election-action .primary-btn,
+    .election-action .secondary-btn {
         width: 100%;
-
         min-width: 0;
-
         height: 46px;
     }
 
@@ -1379,6 +1505,18 @@
     .review-candidate-image {
         width: 68px;
         height: 68px;
+    }
+
+    .election-info-content h3 {
+        font-size: 14px;
+    }
+
+    .election-instructions h3 {
+        font-size: 13.5px;
+    }
+
+    .position-title h3 {
+        font-size: 14px;
     }
 
 }
@@ -1398,6 +1536,8 @@
     .candidate-card {
         grid-template-columns: 38% minmax(0, 62%);
     }
+
+    .voter-page-content .page-header h2 { font-size: 17px; }
 
     .candidate-info {
         padding-left: 10px;

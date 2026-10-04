@@ -18,19 +18,22 @@ public class LiveResultsService {
     private final CandidateRepository candidateRepository;
     private final BallotVoteRepository ballotVoteRepository;
     private final PartylistRepository partylistRepository;
+    private final DrawDetectionService drawDetectionService;
 
     public LiveResultsService(
             ElectionRepository electionRepository,
             CampusRepository campusRepository,
             CandidateRepository candidateRepository,
             BallotVoteRepository ballotVoteRepository,
-            PartylistRepository partylistRepository
+            PartylistRepository partylistRepository,
+            DrawDetectionService drawDetectionService
     ) {
         this.electionRepository = electionRepository;
         this.campusRepository = campusRepository;
         this.candidateRepository = candidateRepository;
         this.ballotVoteRepository = ballotVoteRepository;
         this.partylistRepository = partylistRepository;
+        this.drawDetectionService = drawDetectionService;
     }
 
     @Transactional(readOnly = true)
@@ -56,7 +59,7 @@ public class LiveResultsService {
             List<Candidate> candidates = candidateRepository.findByElectionId(election.getId());
 
             Map<UUID, Long> voteCounts = new HashMap<>();
-            if (phase != ElectionPhase.UPCOMING) {
+            if (hasVotes(phase)) {                                   // was: phase != UPCOMING
                 ballotVoteRepository.countVotesByCandidateForElection(election.getId())
                         .forEach(row -> voteCounts.put((UUID) row[0], (Long) row[1]));
             }
@@ -70,21 +73,14 @@ public class LiveResultsService {
             long totalVotes = ballotVoteRepository
                     .countDistinctBallotsForElection(election.getId());
 
-            results.add(new EntityResultDTO(
-                    election.getId().toString(),
-                    campus.getName(),
-                    election.getTitle(),
-                    election.getTitle(),
-                    phase,
-                    null,
-                    totalVotes,
-                    election.getStartAt(),
-                    election.getEndAt(),
-                    positions,
-                    campus.getId().toString(),
-                    campus.getName(),
-                    null // no department for SSC
-            ));
+            DrawDetectionService.DrawOutcome draw = drawDetectionService.detect(election);
+
+            EntityResultDTO dto = new EntityResultDTO(
+                    election.getId().toString(), campus.getName(), election.getTitle(), election.getTitle(),
+                    phase, null, totalVotes, election.getStartAt(), election.getEndAt(), positions,
+                    campus.getId().toString(), campus.getName(), null);
+            applyElectionMeta(dto, election, draw);
+            results.add(dto);
         }
 
         return results;
@@ -162,25 +158,21 @@ public class LiveResultsService {
             ElectionPhase phase = election.getPhase();
             if (phase == ElectionPhase.NOT_VISIBLE) continue;
 
+            DrawDetectionService.DrawOutcome draw = drawDetectionService.detect(election);
             Department primaryDept = depts.get(0);
             Map<String, List<CandidateResultDTO>> positions;
 
             if (primaryDept.getVotingType() == VotingType.REPRESENTATIVE) {
                 List<Candidate> repCandidates = candidateRepository
                         .findByElectionIdAndDepartmentId(election.getId(), primaryDept.getId());
-                Map<UUID, String> partylistNames = resolvePartylistNames(repCandidates);
                 positions = buildRepresentativePositions(
-                        election.getId(),
-                        primaryDept.getId(),
-                        primaryDept.getPositions(),
-                        phase,
-                        repCandidates,
-                        partylistNames
-                );
+                        election.getId(), primaryDept.getId(),
+                        drawDetectionService.openPositions(election, primaryDept),   // draw elections only show their positions
+                        phase, repCandidates, resolvePartylistNames(repCandidates), draw);
             } else {
                 List<Candidate> candidates = candidateRepository.findByElectionId(election.getId());
                 Map<UUID, Long> voteCounts = new HashMap<>();
-                if (phase != ElectionPhase.UPCOMING) {
+                if (hasVotes(phase)) {
                     ballotVoteRepository.countVotesByCandidateForElection(election.getId())
                             .forEach(row -> voteCounts.put((UUID) row[0], (Long) row[1]));
                 }
@@ -215,6 +207,8 @@ public class LiveResultsService {
             // which party happened to load first as "primary".
             dto.setDepartmentIds(depts.stream().map(d -> d.getId().toString()).toList());
 
+            applyElectionMeta(dto, election, draw);
+
             results.add(dto);
         }
 
@@ -222,22 +216,42 @@ public class LiveResultsService {
     }
 
     private Map<String, List<CandidateResultDTO>> buildRepresentativePositions(
-            UUID electionId,
-            UUID departmentId,
-            List<String> positions,
-            ElectionPhase phase,
-            List<Candidate> candidates,
-            Map<UUID, String> partylistNamesById) {
+            UUID electionId, UUID departmentId, List<String> positions, ElectionPhase phase,
+            List<Candidate> candidates, Map<UUID, String> partylistNamesById, DrawDetectionService.DrawOutcome draw) {
+
+        if (!hasVotes(phase)) {                                // UPCOMING / UNSCHEDULED: just list the candidates
+            Map<String, List<CandidateResultDTO>> upcoming = new LinkedHashMap<>();
+            upcoming.put("Candidates", candidates.stream()
+                    .map(c -> toDto(c, 0L, partylistNamesById)).collect(Collectors.toList()));
+            return upcoming;
+        }
+
         Map<UUID, Candidate> candidateById = candidates.stream()
                 .collect(Collectors.toMap(Candidate::getId, c -> c));
 
-        List<Object[]> rows = phase == ElectionPhase.UPCOMING
-                ? Collections.emptyList()
-                : ballotVoteRepository
-                .countVotesByCandidateAndPositionForElectionAndDepartment(
-                        electionId,
-                        departmentId
-                );
+        List<Object[]> rows = ballotVoteRepository
+                .countVotesByCandidateAndPositionForElectionAndDepartment(electionId, departmentId);
+
+        // ---- CONCLUDED with a draw: DetectionService already resolved winners + ties ----
+        if (draw.hasDraw()) {
+            Map<String, Long> votes = new HashMap<>();
+            for (Object[] r : rows) votes.put(r[0] + "|" + r[1], (Long) r[2]);
+
+            Map<String, List<CandidateResultDTO>> result = new LinkedHashMap<>();
+            for (String position : positions) {
+                List<UUID> tied = draw.tiedByPosition().get(position);
+                if (tied != null) {                           // draw: show every tied candidate, no single winner
+                    result.put(position, tied.stream()
+                            .map(id -> toDto(candidateById.get(id), votes.getOrDefault(id + "|" + position, 0L), partylistNamesById))
+                            .collect(Collectors.toList()));
+                } else if (draw.winnersByPosition().get(position) != null) {
+                    UUID id = draw.winnersByPosition().get(position);
+                    result.put(position, new ArrayList<>(List.of(
+                            toDto(candidateById.get(id), votes.getOrDefault(id + "|" + position, 0L), partylistNamesById))));
+                }
+            }
+            return result;
+        }
 
         record Pairing(UUID candidateId, String position, long votes) {}
 
@@ -276,20 +290,6 @@ public class LiveResultsService {
             filledPositions.add(p.position());
         }
 
-        if (phase == ElectionPhase.UPCOMING) {
-            List<CandidateResultDTO> dtos = candidates.stream()
-                    .map(c -> new CandidateResultDTO(
-                            c.getId(),
-                            c.getFirstName() + " " + c.getLastName(),
-                            c.getPhotoImageUrl(),
-                            c.getPartylistId() != null ? partylistNamesById.get(c.getPartylistId()) : null,
-                            0L))
-                    .collect(Collectors.toList());
-            Map<String, List<CandidateResultDTO>> upcoming = new LinkedHashMap<>();
-            upcoming.put("Candidates", dtos);
-            return upcoming;
-        }
-
         Map<String, List<CandidateResultDTO>> result = new LinkedHashMap<>();
         for (Map.Entry<String, CandidateResultDTO> e : winnerByPosition.entrySet()) {
             if (e.getValue() != null) {
@@ -319,5 +319,27 @@ public class LiveResultsService {
         return getSscLiveResults().stream()
                 .filter(dto -> campusId.toString().equals(dto.getCampusId()))
                 .collect(Collectors.toList());
+    }
+
+    private boolean hasVotes(ElectionPhase phase) {
+        return phase != ElectionPhase.UPCOMING && phase != ElectionPhase.UNSCHEDULED;
+    }
+
+    private void applyElectionMeta(EntityResultDTO dto, Election election, DrawDetectionService.DrawOutcome draw) {
+        dto.setSchoolYear(election.getSchoolYear());
+        dto.setDrawElection(election.isDrawElection());
+        dto.setParentElectionId(election.getParentElectionId() != null
+                ? election.getParentElectionId().toString() : null);
+        if (draw.hasDraw()) {
+            dto.setDrawPositions(new ArrayList<>(draw.positions()));
+            dto.setDrawMessage(DrawDetectionService.DRAW_MESSAGE);
+        }
+    }
+
+    private CandidateResultDTO toDto(Candidate c, long votes, Map<UUID, String> partylistNamesById) {
+        return new CandidateResultDTO(c.getId(), c.getFirstName() + " " + c.getLastName(),
+                c.getPhotoImageUrl(),
+                c.getPartylistId() != null ? partylistNamesById.get(c.getPartylistId()) : null,
+                votes);
     }
 }

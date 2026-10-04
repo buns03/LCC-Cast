@@ -142,16 +142,12 @@ async function loadVoteSummaries() {
   renderVoteSummarySkeleton();
 
   try {
-    const response = await fetch("/voter/vote-summaries/data", {
-      method: "GET",
-      headers: { Accept: "application/json" },
+    const data = await SoftCache.load("/voter/vote-summaries/data", {
+      onRevalidated: (fresh) => {
+        voteSummaries = Array.isArray(fresh) ? fresh.map(normalizeSummary) : [];
+        renderVoteSummaries();
+      },
     });
-
-    if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`);
-    }
-
-    const data = await response.json();
 
     voteSummaries = Array.isArray(data) ? data.map(normalizeSummary) : [];
 
@@ -180,21 +176,24 @@ async function loadVoteSummaries() {
 function normalizeSummary(dto) {
   return {
     id: dto.id,
-    type: dto.type, // "ssc" or "department" — matches already
-    votingType: dto.votingType, // "REPRESENTATIVE" | "PARTYLIST" | null
+    type: dto.type,
+    votingType: dto.votingType,
     referenceNumber: buildReferenceNumber(dto),
     electionTitle: dto.electionTitle,
     electionLabel: dto.electionLabel,
     campus: dto.campus,
     department: dto.department,
-    votedAt: dto.votedAt, // ISO string from Instant — Date() parses this fine
+    votedAt: dto.votedAt,
     candidates: Array.isArray(dto.candidates)
-      ? dto.candidates.map((c) => ({
-          position: c.position,
-          candidateName: c.candidateName,
-          partylist: c.affiliationName, // <-- key rename
-          image: c.image,
-        }))
+      ? sortByPositionOrder(
+          dto.candidates.map((c) => ({
+            position: c.position,
+            candidateName: c.candidateName,
+            partylist: c.affiliationName,
+            image: c.image,
+          })),
+          (c) => c.position,
+        )
       : [],
   };
 }
@@ -574,21 +573,10 @@ function createCandidateItem(candidate) {
 
 function createEmptyState(message) {
   return `
-
-    <div class="summary-card summary-empty-state">
-
-      <i class="bi bi-ballot"></i>
-
-      <h3>
-        No Voting Records
-      </h3>
-
-      <p>
-        ${escapeHtml(message)}
-      </p>
-
+    <div class="election-instructions">
+      <h3>No Voting Records</h3>
+      <p>${escapeHtml(message)}</p>
     </div>
-
   `;
 }
 

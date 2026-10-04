@@ -1171,6 +1171,11 @@ ANIMATION
   font-weight: 600;
 }
 
+.success-toast.error .success-toast-icon {
+    background: #fdecec;
+    color: #dc2626;
+}
+
 /* =========================================================
    TOAST CONTENT
 ========================================================= */

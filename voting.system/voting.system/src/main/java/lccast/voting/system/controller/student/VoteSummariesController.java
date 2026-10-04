@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpSession;
 import lccast.voting.system.dto.VoteSummaryDTO;
 import lccast.voting.system.model.Voter;
 import lccast.voting.system.repository.VoterRepository;
+import lccast.voting.system.service.CandidatePortalService;
 import lccast.voting.system.service.VoteSummaryService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -11,6 +12,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,12 +23,15 @@ public class VoteSummariesController {
 
     private final VoteSummaryService voteSummaryService;
     private final VoterRepository voterRepository;
+    private final CandidatePortalService candidatePortalService;
 
     public VoteSummariesController(
             VoteSummaryService voteSummaryService,
-            VoterRepository voterRepository) {
+            VoterRepository voterRepository,
+            CandidatePortalService candidatePortalService) {
         this.voteSummaryService = voteSummaryService;
         this.voterRepository = voterRepository;
+        this.candidatePortalService = candidatePortalService;
     }
 
     @GetMapping("/vote-summaries")
@@ -44,8 +50,20 @@ public class VoteSummariesController {
         model.addAttribute("role", role);
         model.addAttribute("programCourse", programCourse);
         model.addAttribute("campus", campus);
+        model.addAttribute("avatarUrl", resolveAvatarUrl((String) session.getAttribute("userId"))); // ADD
 
         return "voter/vote-summaries.html";
+    }
+
+    private String resolveAvatarUrl(String authUserIdStr) {
+        if (authUserIdStr == null) {
+            return null;
+        }
+        String storagePath = candidatePortalService.findAvatarStoragePath(UUID.fromString(authUserIdStr));
+        if (storagePath == null) {
+            return null;
+        }
+        return "/api/storage/file?path=" + URLEncoder.encode(storagePath, StandardCharsets.UTF_8);
     }
 
     // VOTER-ONLY endpoint: resolves the voter strictly from the

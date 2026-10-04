@@ -5,6 +5,7 @@
 ========================================================= */
 
 const PARTYLIST_API = "/superadmin/api/partylists";
+let partylistsRunId = 0;
 
 function getProtectedFileUrl(storagePath) {
     if (!storagePath) return "";
@@ -58,8 +59,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     initializeSuccessToast();
     initializeValidationBindings();
 
+    initializeDefaultSchoolYear();
+
     await loadCampuses();
     await loadExistingPartylists();
+    connectPartylistsSocket();
 });
 
 const DEFAULT_POSITIONS = [
@@ -67,11 +71,40 @@ const DEFAULT_POSITIONS = [
     "Auditor", "PRO Internal", "PRO External"
 ];
 
+function sortMembersByPosition(members) {
+    return [...members].sort((a, b) => {
+        const posA = DEFAULT_POSITIONS.indexOf(a.position);
+        const posB = DEFAULT_POSITIONS.indexOf(b.position);
+        // Unknown/custom positions (e.g. "Member", "Others" text) fall after the known ones, keeping their relative order
+        const rankA = posA === -1 ? DEFAULT_POSITIONS.length : posA;
+        const rankB = posB === -1 ? DEFAULT_POSITIONS.length : posB;
+        return rankA - rankB;
+    });
+}
+
 let pendingDeleteCard = null;
 let pendingArchiveCard = null;
 let pendingSaveAction = null;
 let successToastTimeout = null;
 let discardToastTimeout = null;
+
+function getDefaultSchoolYear(referenceDate = new Date()) {
+  const year = referenceDate.getFullYear();
+  const month = referenceDate.getMonth(); // 0 = Jan ... 5 = June
+
+  const startYear = month >= 5 ? year : year - 1;
+
+  return `${startYear}-${startYear + 1}`;
+}
+
+function initializeDefaultSchoolYear() {
+    const schoolYearInput = document.getElementById("partylistsSchoolYear");
+    if (!schoolYearInput) return;
+
+    if (!schoolYearInput.value.trim()) {
+        schoolYearInput.value = getDefaultSchoolYear();
+    }
+}
 
 async function loadExistingPartylists() {
 
@@ -79,20 +112,17 @@ async function loadExistingPartylists() {
 
     if (!list) return;
 
+    const runId = ++partylistsRunId;
+
     try {
 
-        const response = await fetch(`${PARTYLIST_API}`, {
-            method: "GET",
-            headers: {
-                "Accept": "application/json"
+        const partylists = await SoftCache.load(PARTYLIST_API, {
+            ttl: 30000,
+            onRevalidated: () => {
+                if (document.querySelector("#existingPartylists .partylists-item.editing")) return;
+                loadExistingPartylists();
             }
         });
-
-        if (!response.ok) {
-            throw new Error(`Failed to load partylists: ${response.status}`);
-        }
-
-        const partylists = await response.json();
 
         list.innerHTML = "";
 
@@ -107,6 +137,8 @@ async function loadExistingPartylists() {
         }
 
         for (const partylist of partylists) {
+
+            if (runId !== partylistsRunId) return;
 
             const card = document.createElement("article");
 
@@ -294,6 +326,26 @@ async function loadExistingPartylists() {
     }
 }
 
+function connectPartylistsSocket() {
+  if (typeof StompJs === "undefined" || typeof SockJS === "undefined") {
+    console.error("StompJs/SockJS not loaded — real-time partylist updates disabled.");
+    return;
+  }
+
+  const client = new StompJs.Client({
+    webSocketFactory: () => new SockJS("/ws-analytics"),
+    reconnectDelay: 4000,
+    onConnect: () => {
+       client.subscribe("/topic/partylists", () => {
+              SoftCache.clear();
+              loadExistingPartylists();
+            });
+    },
+  });
+
+  client.activate();
+}
+
 async function loadPartylistMembers(card, partylistId) {
 
     const memberList = card.querySelector(".existing-member-list");
@@ -302,21 +354,11 @@ async function loadPartylistMembers(card, partylistId) {
 
     try {
 
-        const response = await fetch(
+        const rawMembers = await SoftCache.load(
             `${PARTYLIST_API}/${partylistId}/members`,
-            {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json"
-                }
-            }
+            { ttl: 30000 }
         );
-
-        if (!response.ok) {
-            throw new Error("Failed to load partylist members.");
-        }
-
-        const members = await response.json();
+        const members = Array.isArray(rawMembers) ? sortMembersByPosition(rawMembers) : rawMembers;
 
         memberList.innerHTML = "";
 
@@ -502,7 +544,7 @@ function showExistingMemberFile(memberElement, type) {
             message = "No background/COC uploaded.";
         }
 
-        alert(message);
+        showFileErrorToast(message);
         return;
     }
 
@@ -605,6 +647,8 @@ function showExistingMemberFile(memberElement, type) {
 
     document.body.appendChild(preview);
 
+    applyDocumentPreviewRatio(preview, type);
+
     const clickedButton =
         type === "campaign"
             ? memberElement.querySelector(".view-member-campaign")
@@ -704,21 +748,7 @@ async function loadCampuses() {
 
     try {
 
-        const response = await fetch(
-            `${PARTYLIST_API}/campuses`,
-            {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json"
-                }
-            }
-        );
-
-        if (!response.ok) {
-            throw new Error("Failed to load campuses.");
-        }
-
-        const campuses = await response.json();
+        const campuses = await SoftCache.load(`${PARTYLIST_API}/campuses`, { ttl: 300000 });
 
         campusSelect.innerHTML = `
             <option value="">Select Campus</option>
@@ -1818,8 +1848,10 @@ function showMemberFilePreview(row, type) {
             deleteMemberFile(row, type);
         });
 
+    applyDocumentPreviewRatio(preview, type);
+
     requestAnimationFrame(() => {
-        positionMemberFilePreview(row, preview);
+        positionMemberFilePreview(row, preview, type);
     });
 }
 
@@ -3310,6 +3342,11 @@ function resetCreateForm() {
 
     form.reset();
 
+    const schoolYearInput = document.getElementById("partylistsSchoolYear");
+        if (schoolYearInput) {
+            schoolYearInput.value = getDefaultSchoolYear();   // ADD THIS
+        }
+
     // form.reset() doesn't clear our custom preview markup - reset it manually
     document.querySelectorAll("#createPartylists .partylists-file-upload").forEach(upload => {
         const preview = upload.querySelector(".partylists-file-preview");
@@ -3477,3 +3514,43 @@ async function loadTrashPartylists() {
     return await response.json();
 }
 
+function showFileErrorToast(message) {
+    let toast = document.getElementById("fileErrorToast");
+
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "fileErrorToast";
+        toast.className = "success-toast error";
+
+        toast.innerHTML = `
+            <div class="success-toast-icon">
+                <i class="bi bi-exclamation-circle-fill"></i>
+            </div>
+
+            <div class="success-toast-content">
+                <strong>No File Uploaded</strong>
+                <span id="fileErrorToastMessage"></span>
+            </div>
+
+            <button
+                type="button"
+                class="success-toast-close"
+                id="fileErrorToastClose"
+                aria-label="Close notification">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        `;
+
+        document.body.appendChild(toast);
+
+        toast.querySelector("#fileErrorToastClose")
+            ?.addEventListener("click", () => toast.classList.remove("show"));
+    }
+
+    toast.querySelector("#fileErrorToastMessage").textContent = message;
+
+    requestAnimationFrame(() => toast.classList.add("show"));
+
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => toast.classList.remove("show"), 4000);
+}

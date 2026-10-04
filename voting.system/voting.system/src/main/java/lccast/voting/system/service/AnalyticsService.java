@@ -28,6 +28,7 @@ public class AnalyticsService {
     private final BallotVoteRepository ballotVoteRepository;
     private final ElectionDepartmentRepository electionDepartmentRepository;
     private final VoteLogRepository voteLogRepository;   // ADD
+    private final DrawDetectionService drawDetectionService;
 
     public AnalyticsService(
             CampusRepository campusRepository,
@@ -39,7 +40,8 @@ public class AnalyticsService {
             BallotRepository ballotRepository,
             BallotVoteRepository ballotVoteRepository,
             ElectionDepartmentRepository electionDepartmentRepository,
-            VoteLogRepository voteLogRepository) {   // ADD
+            VoteLogRepository voteLogRepository,
+            DrawDetectionService drawDetectionService) {   // ADD
         this.campusRepository = campusRepository;
         this.departmentRepository = departmentRepository;
         this.electionRepository = electionRepository;
@@ -50,6 +52,7 @@ public class AnalyticsService {
         this.ballotVoteRepository = ballotVoteRepository;
         this.electionDepartmentRepository = electionDepartmentRepository;
         this.voteLogRepository = voteLogRepository;   // ADD
+        this.drawDetectionService = drawDetectionService;
     }
 
     public FullAnalytics getFullAnalytics() {
@@ -90,30 +93,30 @@ public class AnalyticsService {
         response.departmentTitle = department.getTitle();
         response.votingType = department.getVotingType() != null ? department.getVotingType().name() : null;
 
-        // Only ACTIVE elections are ever considered — archived/deleted drop out automatically
-        Election election = electionRepository
+        // Every ACTIVE election of this program code (all school years), newest first.
+// Matched by program code, not by one Department row, because each school
+// year has its own department row.
+        List<Election> elections = orderNewestFirst(electionRepository
                 .findByCampusIdAndCategoryAndStatus(campusId, ElectionCategory.DEPARTMENT, RecordStatus.ACTIVE)
                 .stream()
-                .filter(e -> e.getElectionDepartments().stream()
-                        .anyMatch(ed -> ed.getDepartment().getId().equals(department.getId())))
-                .findFirst()
-                .orElse(null);
+                .filter(e -> e.getElectionDepartments().stream().anyMatch(ed ->
+                        departmentCode.equalsIgnoreCase(DepartmentUtils.extractProgramCode(ed.getDepartment()))))
+                .toList());
 
-        if (election == null) {
+        if (elections.isEmpty()) {
             response.hasActiveElection = false;
             return response;
         }
 
         response.hasActiveElection = true;
 
-        CampusAnalytics ca = buildCampusAnalytics(campus, election, List.of(department));
-        ca.status = new LabeledSeries(
-                List.of("Voted", "Not Yet Voted"),
-                List.of(ca.votesCast, Math.max(ca.totalVoters - ca.votesCast, 0))
-        );
-        ca.votingType = response.votingType;
+        List<CampusAnalytics> history = elections.stream()
+                .map(election -> buildDeptElectionAnalytics(campus, election, departmentCode))
+                .toList();
 
-        response.analytics = ca;
+        response.analytics = history.get(primaryIndex(elections));
+        response.history = history;            // all school years
+
         return response;
     }
 
@@ -123,54 +126,104 @@ public class AnalyticsService {
 
     // ============ SSC ============
 
+    private List<Election> sscElectionsNewestFirst(UUID campusId) {
+        return orderNewestFirst(electionRepository
+                .findByCampusIdAndCategoryAndStatus(campusId, ElectionCategory.SSC, RecordStatus.ACTIVE));
+    }
+
+    private CampusAnalytics buildSSCElectionAnalytics(Campus campus, Election election) {
+        CampusAnalytics ca = buildCampusAnalytics(campus, election, null);
+        ca.partyLists = buildPartylistVotes(election);
+        ca.programVotes = buildProgramVotes(election.getId());
+        ca.programNotVoted = buildProgramNotVoted(campus.getId(), election.getId());
+        return ca;
+    }
+
+    private CampusAnalytics emptySscAnalytics(Campus campus) {
+        CampusAnalytics ca = new CampusAnalytics();
+        ca.campus = campus.getName();
+        ca.candidates = List.of();
+        ca.partyLists = List.of();
+        ca.programVotes = List.of();
+        ca.programNotVoted = List.of();
+        ca.yearLevel = new LabeledSeries(List.of(), List.of());
+        ca.activity = new LabeledSeries(List.of(), List.of());
+        return ca;
+    }
+
     private SSCAnalytics buildSSCAnalytics() {
         SSCAnalytics ssc = new SSCAnalytics();
         ssc.campuses = new LinkedHashMap<>();
+        ssc.elections = new LinkedHashMap<>();
 
         for (Campus campus : activeCampuses()) {
-            ssc.campuses.put(campusKey(campus), buildSSCCampusAnalytics(campus));
+            String key = campusKey(campus);
+            List<Election> elections = sscElectionsNewestFirst(campus.getId());
+
+            if (elections.isEmpty()) {
+                ssc.campuses.put(key, emptySscAnalytics(campus));
+                continue;
+            }
+
+            int primary = primaryIndex(elections);
+
+            for (int i = 0; i < elections.size(); i++) {
+                Election election = elections.get(i);
+                CampusAnalytics ca = buildSSCElectionAnalytics(campus, election);
+
+                if (i == primary) ssc.campuses.put(key, ca);   // original stays the "latest" slot
+
+                ssc.elections
+                        .computeIfAbsent(election.getId().toString(), k -> new LinkedHashMap<>())
+                        .put(key, ca);
+            }
         }
         return ssc;
     }
 
-    /**
-     * Scoped SSC analytics for a single campus — used by admin-ssc,
-     * which only ever needs its own campus's numbers. Superadmin's
-     * buildSSCAnalytics() above calls this same helper per-campus,
-     * so behavior there is unchanged.
-     */
+    /** Latest SSC election for the campus (unchanged signature for admin-ssc). */
     public CampusAnalytics getSscAnalyticsForCampus(UUID campusId) {
         Campus campus = campusRepository.findById(campusId)
                 .orElseThrow(() -> new RuntimeException("Campus not found."));
 
-        return buildSSCCampusAnalytics(campus);
+        List<Election> elections = sscElectionsNewestFirst(campusId);
+
+        return elections.isEmpty()
+                ? emptySscAnalytics(campus)
+                : buildSSCElectionAnalytics(campus, elections.get(primaryIndex(elections)));
     }
 
-    private CampusAnalytics buildSSCCampusAnalytics(Campus campus) {
-        Optional<Election> electionOpt = electionRepository
-                .findByCampusIdAndCategoryAndStatus(campus.getId(), ElectionCategory.SSC, RecordStatus.ACTIVE)
-                .stream().findFirst();
+    /** Every SSC election of the campus (all school years), newest first. */
+    public List<CampusAnalytics> getSscAnalyticsHistoryForCampus(UUID campusId) {
+        Campus campus = campusRepository.findById(campusId)
+                .orElseThrow(() -> new RuntimeException("Campus not found."));
 
-        CampusAnalytics ca = new CampusAnalytics();
-        ca.campus = campus.getName();
-
-        if (electionOpt.isPresent()) {
-            Election election = electionOpt.get();
-            ca = buildCampusAnalytics(campus, election, null);
-            ca.partyLists = buildPartylistVotes(election);
-            ca.programVotes = buildProgramVotes(election.getId());
-        } else {
-            ca.candidates = List.of();
-            ca.partyLists = List.of();
-            ca.programVotes = List.of();
-            ca.yearLevel = new LabeledSeries(List.of(), List.of());
-            ca.activity = new LabeledSeries(List.of(), List.of());
-        }
-
-        return ca;
+        return sscElectionsNewestFirst(campusId).stream()
+                .map(election -> buildSSCElectionAnalytics(campus, election))
+                .toList();
     }
 
     // ============ DEPARTMENT ============
+
+    private CampusAnalytics buildDeptElectionAnalytics(Campus campus, Election election, String departmentCode) {
+
+        // This election's departments that belong to the admin's program code
+        List<Department> depts = election.getElectionDepartments().stream()
+                .map(ElectionDepartment::getDepartment)
+                .filter(d -> departmentCode.equalsIgnoreCase(DepartmentUtils.extractProgramCode(d)))
+                .toList();
+
+        CampusAnalytics ca = buildCampusAnalytics(campus, election, depts);
+        ca.status = new LabeledSeries(
+                List.of("Voted", "Not Yet Voted"),
+                List.of(ca.votesCast, Math.max(ca.totalVoters - ca.votesCast, 0))
+        );
+
+        VotingType votingType = depts.isEmpty() ? null : depts.get(0).getVotingType();
+        ca.votingType = votingType != null ? votingType.name() : null;
+
+        return ca;
+    }
 
     private DepartmentAnalytics buildDepartmentAnalytics() {
         DepartmentAnalytics da = new DepartmentAnalytics();
@@ -211,6 +264,11 @@ public class AnalyticsService {
         ca.campus = campus.getName();
         ca.electionId = election.getId().toString();
         ca.electionTitle = election.getTitle();
+        ca.schoolYear = election.getSchoolYear();
+        ca.phase = election.getPhase() != null ? election.getPhase().name() : null;
+        ca.parentElectionId = election.getParentElectionId() != null ? election.getParentElectionId().toString() : null;
+        ca.drawElection = election.isDrawElection();
+        ca.drawPositions = new ArrayList<>(drawDetectionService.detect(election).positions());
 
         if (deptFilter == null || deptFilter.isEmpty()) {
             ca.totalVoters = voterRepository.countByStatusAndCampusId(RecordStatus.ACTIVE, campus.getId());
@@ -275,6 +333,29 @@ public class AnalyticsService {
                 .collect(Collectors.toList());
     }
 
+    /** Registered voters per program (this campus only) minus those who already voted. */
+    private List<ProgramVotes> buildProgramNotVoted(UUID campusId, UUID electionId) {
+        Map<String, Long> votedByProgram = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (Object[] r : voteLogRepository.countByElectionIdGroupByProgram(electionId)) {
+            if (r[0] == null) continue;
+            votedByProgram.merge(((String) r[0]).trim(), (Long) r[1], Long::sum);
+        }
+
+        Map<String, Long> totalByProgram = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (Voter v : voterRepository.findByCampusIdAndStatus(campusId, RecordStatus.ACTIVE)) {
+            String program = v.getProgramCourse();
+            if (program == null || program.isBlank()) continue;
+            totalByProgram.merge(program.trim(), 1L, Long::sum);
+        }
+
+        return totalByProgram.entrySet().stream()
+                .map(e -> new ProgramVotes(
+                        e.getKey(),
+                        Math.max(e.getValue() - votedByProgram.getOrDefault(e.getKey(), 0L), 0L),
+                        null))
+                .collect(Collectors.toList());
+    }
+
     private LabeledSeries buildYearLevel(UUID electionId) {
         List<Object[]> rows = voteLogRepository.countByElectionIdGroupByYearLevel(electionId);
 
@@ -312,6 +393,31 @@ public class AnalyticsService {
         return campus.getName().toLowerCase().replaceAll("\\s+", "-");
     }
 
+    private List<Election> orderNewestFirst(List<Election> elections) {
+        Map<UUID, Election> byId = elections.stream()
+                .collect(Collectors.toMap(Election::getId, e -> e, (a, b) -> a));
 
+        Comparator<Election> cmp = Comparator
+                .comparing((Election e) -> rootStart(e, byId))
+                .reversed()
+                .thenComparing(Election::isDrawElection, Comparator.reverseOrder())   // draw sits above its parent
+                .thenComparing(Election::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder()));
+
+        return elections.stream().sorted(cmp).toList();
+    }
+
+    private Instant rootStart(Election e, Map<UUID, Election> byId) {
+        Election cur = e;
+        for (int i = 0; i < 10 && cur.getParentElectionId() != null && byId.containsKey(cur.getParentElectionId()); i++) {
+            cur = byId.get(cur.getParentElectionId());
+        }
+        return cur.getStartAt() != null ? cur.getStartAt() : cur.getCreatedAt();
+    }
+
+    /** The slot the existing UI reads = newest NON-draw election. */
+    private int primaryIndex(List<Election> elections) {
+        for (int i = 0; i < elections.size(); i++) if (!elections.get(i).isDrawElection()) return i;
+        return 0;
+    }
 
 }

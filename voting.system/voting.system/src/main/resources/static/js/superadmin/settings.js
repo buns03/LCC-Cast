@@ -9,7 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeSettingsAccordions();
 
   fetchAdmins();
-  fetchSystemSettings();
+//  fetchSystemSettings();
   fetchSecuritySettings();
 
   initializeAdminSearch();
@@ -18,15 +18,13 @@ document.addEventListener("DOMContentLoaded", () => {
   initializePasswordToggles();
   initializeAdminForms();
   initializeElectionManagementFields();
-  initializeLogoUpload();
+//  initializeLogoUpload();
   initializeSettingsModals();
 });
 
 async function fetchAdmins() {
   try {
-    const res = await fetch("/superadmin/api/admins");
-    if (!res.ok) throw new Error("Failed to load admins");
-    admins = await res.json();
+    admins = await SoftCache.load("/superadmin/api/admins", { ttl: 30000, swr: false });
   } catch (err) {
     console.error(err);
     admins = [];
@@ -40,53 +38,44 @@ async function fetchAdmins() {
   if (window.renderAdminPage) window.renderAdminPage();
 }
 
-async function fetchSystemSettings() {
-  try {
-    const res = await fetch("/superadmin/api/system-settings");
-
-    if (!res.ok) {
-      throw new Error("Failed to load system settings");
-    }
-
-    const settings = await res.json();
-
-    const systemName = document.getElementById("systemName");
-    const academicYear = document.getElementById("academicYear");
-    const description = document.getElementById("systemDescription");
-
-    if (systemName) {
-      systemName.value = settings.systemName || "";
-    }
-
-    if (academicYear) {
-      academicYear.value = settings.academicYear || "";
-    }
-
-    if (description) {
-      description.value = settings.description || "";
-    }
-
-    const logoPreview = document.getElementById("systemLogoPreview");
-
-    if (logoPreview) {
-      if (settings.logoPath) {
-        logoPreview.src =
-          `/superadmin/api/system-settings/logo?t=${Date.now()}`;
-      } else {
-        logoPreview.src = "/images/logo.png";
-      }
-    }
-  } catch (err) {
-    console.error("Failed to load system settings:", err);
-  }
-}
+//async function fetchSystemSettings() {
+//  try {
+//    const settings = await SoftCache.load("/superadmin/api/system-settings", { ttl: 60000 });
+//
+//    const systemName = document.getElementById("systemName");
+//    const academicYear = document.getElementById("academicYear");
+//    const description = document.getElementById("systemDescription");
+//
+//    if (systemName) {
+//      systemName.value = settings.systemName || "";
+//    }
+//
+//    if (academicYear) {
+//      academicYear.value = settings.academicYear || "";
+//    }
+//
+//    if (description) {
+//      description.value = settings.description || "";
+//    }
+//
+//    const logoPreview = document.getElementById("systemLogoPreview");
+//
+//    if (logoPreview) {
+//      if (settings.logoPath) {
+//        logoPreview.src =
+//          `/superadmin/api/system-settings/logo?t=${Date.now()}`;
+//      } else {
+//        logoPreview.src = "/images/logo.png";
+//      }
+//    }
+//  } catch (err) {
+//    console.error("Failed to load system settings:", err);
+//  }
+//}
 
 async function fetchSecuritySettings() {
   try {
-    const res = await fetch("/superadmin/api/security-settings");
-    if (!res.ok) throw new Error("Failed to load security settings");
-
-    const settings = await res.json();
+    const settings = await SoftCache.load("/superadmin/api/security-settings", { ttl: 60000 });
     const toggle = document.getElementById("autoLogoutToggle");
 
     if (toggle) {
@@ -97,67 +86,67 @@ async function fetchSecuritySettings() {
   }
 }
 
-function initializeLogoUpload() {
-  const input = document.getElementById("systemLogoInput");
-  const button = document.getElementById("changeLogoBtn");
-  const preview = document.getElementById("systemLogoPreview");
-
-  if (!input || !button || !preview) return;
-
-  button.addEventListener("click", () => {
-    input.click();
-  });
-
-  input.addEventListener("change", async () => {
-    const file = input.files?.[0];
-
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    showActionLoading(
-      "Uploading Logo",
-      "Please wait while the system logo is being uploaded..."
-    );
-
-    try {
-      const res = await fetch("/superadmin/api/system-settings/logo", {
-        method: "POST",
-        body: formData
-      });
-
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
-
-      const settings = await res.json();
-
-      if (settings.logoPath) {
-        preview.src =
-          "/superadmin/api/system-settings/logo";
-      }
-
-      hideActionLoading();
-
-      showSuccessToast(
-        "Logo Updated",
-        "System logo uploaded successfully."
-      );
-
-      input.value = "";
-    } catch (err) {
-      hideActionLoading();
-
-      showSuccessToast(
-        "Upload Failed",
-        err.message || "Could not upload system logo."
-      );
-
-      input.value = "";
-    }
-  });
-}
+//function initializeLogoUpload() {
+//  const input = document.getElementById("systemLogoInput");
+//  const button = document.getElementById("changeLogoBtn");
+//  const preview = document.getElementById("systemLogoPreview");
+//
+//  if (!input || !button || !preview) return;
+//
+//  button.addEventListener("click", () => {
+//    input.click();
+//  });
+//
+//  input.addEventListener("change", async () => {
+//    const file = input.files?.[0];
+//
+//    if (!file) return;
+//
+//    const formData = new FormData();
+//    formData.append("file", file);
+//
+//    showActionLoading(
+//      "Uploading Logo",
+//      "Please wait while the system logo is being uploaded..."
+//    );
+//
+//    try {
+//      const res = await fetch("/superadmin/api/system-settings/logo", {
+//        method: "POST",
+//        body: formData
+//      });
+//
+//      if (!res.ok) {
+//        throw new Error(await res.text());
+//      }
+//
+//      const settings = await res.json();
+//
+//      if (settings.logoPath) {
+//        preview.src =
+//          "/superadmin/api/system-settings/logo";
+//      }
+//
+//      hideActionLoading();
+//
+//      showSuccessToast(
+//        "Logo Updated",
+//        "System logo uploaded successfully."
+//      );
+//
+//      input.value = "";
+//    } catch (err) {
+//      hideActionLoading();
+//
+//      showSuccessToast(
+//        "Upload Failed",
+//        err.message || "Could not upload system logo."
+//      );
+//
+//      input.value = "";
+//    }
+//  });
+//}
 
 let adminCurrentPage = 1;
 
@@ -179,6 +168,23 @@ function escapeHTML(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function wirePasswordStrengthByElement(inputEl, feedbackEl, getButtons) {
+  if (!inputEl) return;
+  function update() {
+    const { valid, message } = getPasswordFeedback(inputEl.value);
+    if (feedbackEl) {
+      feedbackEl.textContent = inputEl.value ? message : "";
+      feedbackEl.classList.toggle("valid", !!inputEl.value && valid);
+      feedbackEl.classList.toggle("invalid", !!inputEl.value && !valid);
+    }
+    (typeof getButtons === "function" ? getButtons() : []).forEach((btn) => {
+      if (btn) btn.disabled = !!inputEl.value && !valid;
+    });
+  }
+  inputEl.addEventListener("input", update);
+  update();
 }
 
 /* =========================================================
@@ -502,10 +508,10 @@ function renderAdmins() {
                                 <select class="edit-admin-campus" required>
 
                                     <option
-                                        value="College"
-                                        ${admin.campus === "College" ? "selected" : ""}
+                                        value="Kaypian"
+                                        ${admin.campus === "Kaypian" ? "selected" : ""}
                                     >
-                                        College
+                                        Kaypian
                                     </option>
 
 
@@ -670,26 +676,11 @@ function renderAdmins() {
                                 </label>
 
                                 <div class="password-field">
-
-                                    <input
-                                        type="password"
-                                        class="edit-admin-password"
-                                        placeholder="Leave blank to keep current password"
-                                        autocomplete="new-password"
-                                    />
-
-                                    <button
-                                        type="button"
-                                        class="password-toggle"
-                                        aria-label="Show password"
-                                    >
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-
+                                    <input type="password" class="edit-admin-password" placeholder="Leave blank to keep current password" autocomplete="new-password" />
+                                    <button type="button" class="password-toggle" aria-label="Show password"><i class="bi bi-eye"></i></button>
                                 </div>
-
-                                <small class="field-error">
-                                </small>
+                                <small class="password-strength-message edit-admin-password-strength"></small>
+                                <small class="field-error"></small>
 
                             </div>
 
@@ -1736,6 +1727,12 @@ function initializeAdminForms() {
         validatePasswordMatch();
       });
 
+          wirePasswordStrengthFeedback({
+            passwordInputId: "adminPassword",
+            feedbackId: "adminPasswordStrength",
+            getButtons: () => [document.getElementById("addAdminSubmitBtn")]
+          });
+
       confirmPassword.addEventListener("focus", () => {
         confirmPassword.dataset.touched = "true";
       });
@@ -1759,29 +1756,27 @@ function initializeAdminForms() {
                    REQUIRED FIELDS
                 ----------------------------------------- */
 
-      requiredFields.forEach((field) => {
-        /*
-         * Disabled fields are intentionally excluded
-         * from validation.
-         *
-         * This is important for SSC Election because
-         * Department is disabled and must remain blank.
-         */
-        if (field.disabled) {
-          return;
-        }
+            requiredFields.forEach((field) => {
+              if (field.disabled) {
+                return;
+              }
 
-        if (field.value.trim() === "") {
-          showFieldError(field);
+              if (field.value.trim() === "") {
+                showFieldError(field);
 
-          isValid = false;
-        }
-      });
+                isValid = false;
+              }
+            });
 
-      /* -----------------------------------------
-                   PASSWORD MATCH
-                ----------------------------------------- */
-      confirmPassword.dataset.touched = "true";
+            if (password.value !== "") {
+              const feedback = getPasswordFeedback(password.value);
+              if (!feedback.valid) {
+                showFieldError(password);
+                isValid = false;
+              }
+            }
+
+            confirmPassword.dataset.touched = "true";
 
       if (!validatePasswordMatch()) {
         isValid = false;
@@ -1804,6 +1799,8 @@ function initializeAdminForms() {
       openSettingsModal("addAdminModal");
     });
   }
+
+
 
   /* ---------------------------------------------
    EDIT ADMIN
@@ -1911,53 +1908,53 @@ function initializeAdminForms() {
    SYSTEM SETTINGS
 --------------------------------------------- */
 
-  const systemForm = document.querySelector(".system-form");
-
-  if (systemForm) {
-    const requiredFields = systemForm.querySelectorAll(
-      "input[required], select[required]",
-    );
-
-    requiredFields.forEach((field) => {
-      field.addEventListener("focus", () => {
-        clearFieldError(field);
-      });
-
-      field.addEventListener("input", () => {
-        if (field.value.trim() !== "") {
-          clearFieldError(field);
-        }
-      });
-
-      field.addEventListener("change", () => {
-        if (field.value.trim() !== "") {
-          clearFieldError(field);
-        }
-      });
-    });
-
-    systemForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-
-      let isValid = true;
-
-      requiredFields.forEach((field) => {
-        if (field.value.trim() === "") {
-          showFieldError(field);
-
-          isValid = false;
-        }
-      });
-
-      if (!isValid) {
-        return;
-      }
-
-      pendingSaveForm = systemForm;
-
-      openSettingsModal("saveSettingsModal");
-    });
-  }
+//  const systemForm = document.querySelector(".system-form");
+//
+//  if (systemForm) {
+//    const requiredFields = systemForm.querySelectorAll(
+//      "input[required], select[required]",
+//    );
+//
+//    requiredFields.forEach((field) => {
+//      field.addEventListener("focus", () => {
+//        clearFieldError(field);
+//      });
+//
+//      field.addEventListener("input", () => {
+//        if (field.value.trim() !== "") {
+//          clearFieldError(field);
+//        }
+//      });
+//
+//      field.addEventListener("change", () => {
+//        if (field.value.trim() !== "") {
+//          clearFieldError(field);
+//        }
+//      });
+//    });
+//
+//    systemForm.addEventListener("submit", (event) => {
+//      event.preventDefault();
+//
+//      let isValid = true;
+//
+//      requiredFields.forEach((field) => {
+//        if (field.value.trim() === "") {
+//          showFieldError(field);
+//
+//          isValid = false;
+//        }
+//      });
+//
+//      if (!isValid) {
+//        return;
+//      }
+//
+//      pendingSaveForm = systemForm;
+//
+//      openSettingsModal("saveSettingsModal");
+//    });
+//  }
 
   /* ---------------------------------------------
    SECURITY
@@ -1971,6 +1968,12 @@ function initializeAdminForms() {
     const password = requiredFields[1];
 
     const confirmPassword = requiredFields[2];
+
+        wirePasswordStrengthFeedback({
+          passwordInputId: "newPassword",
+          feedbackId: "securityNewPasswordStrength",
+          getButtons: () => [document.getElementById("updateSecurityBtn")]
+        });
 
     requiredFields.forEach((field) => {
       field.addEventListener("focus", () => {
@@ -1996,19 +1999,23 @@ function initializeAdminForms() {
                    REQUIRED FIELDS
                 ----------------------------------------- */
 
-      requiredFields.forEach((field) => {
-        if (field.value.trim() === "") {
-          showFieldError(field);
+            requiredFields.forEach((field) => {
+              if (field.value.trim() === "") {
+                showFieldError(field);
 
-          isValid = false;
-        }
-      });
+                isValid = false;
+              }
+            });
 
-      /* -----------------------------------------
-                   PASSWORD MATCH
-                ----------------------------------------- */
+            if (password.value.trim() !== "") {
+              const feedback = getPasswordFeedback(password.value);
+              if (!feedback.valid) {
+                showFieldError(password);
+                isValid = false;
+              }
+            }
 
-      const confirmPassword = requiredFields[2];
+            const confirmPassword = requiredFields[2];
 
       if (confirmPassword) {
         confirmPassword.dataset.touched = "true";
@@ -2304,24 +2311,33 @@ function validateEditPasswordMatch(form) {
     return true;
   }
 
-  /* Only one entered */
-  if (!passwordValue || !confirmValue) {
-    confirmGroup.classList.add("has-error");
-    confirmGroup.classList.remove("password-mismatch");
+    /* Only one entered */
+    if (!passwordValue || !confirmValue) {
+      confirmGroup.classList.add("has-error");
+      confirmGroup.classList.remove("password-mismatch");
 
-    if (requiredMessage) {
-      requiredMessage.style.display = "inline";
+      if (requiredMessage) {
+        requiredMessage.style.display = "inline";
+      }
+
+      if (mismatchMessage) {
+        mismatchMessage.style.display = "none";
+      }
+
+      return false;
     }
 
-    if (mismatchMessage) {
-      mismatchMessage.style.display = "none";
+    /* Password strength */
+    const feedback = getPasswordFeedback(passwordValue);
+    const passwordGroup = password.closest(".form-group");
+    if (!feedback.valid) {
+      passwordGroup?.classList.add("has-error");
+      return false;
     }
+    passwordGroup?.classList.remove("has-error");
 
-    return false;
-  }
-
-  /* Passwords don't match */
-  if (passwordValue !== confirmValue) {
+    /* Passwords don't match */
+    if (passwordValue !== confirmValue) {
     confirmGroup.classList.add("has-error", "password-mismatch");
 
     if (requiredMessage) {
@@ -3050,9 +3066,7 @@ function initializeSettingsModals() {
         pendingSaveForm = null;
         closeSettingsModal("saveSettingsModal");
 
-        if (form.classList.contains("system-form")) {
-          await saveSystemSettings(form);
-        } else if (form.classList.contains("security-form")) {
+        if (form.classList.contains("security-form")) {
           await saveSecuritySettings(form);
         }
       });

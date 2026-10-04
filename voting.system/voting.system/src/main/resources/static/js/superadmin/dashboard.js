@@ -23,6 +23,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     initializeChart();
 
+    connectDashboardSocket();
+
 });
 
 function setGreeting() {
@@ -100,69 +102,18 @@ async function loadDashboardStatistics(campus = "all") {
 
     try {
 
-        const response = await fetch(
-            `/superadmin/api/dashboard?campus=${encodeURIComponent(campus)}`
+        const data = await SoftCache.load(
+            `/superadmin/api/dashboard?campus=${encodeURIComponent(campus)}`,
+            {
+                ttl: 15000,
+                onRevalidated: fresh => {
+                    const current = document.getElementById("campusSelect")?.value || "all";
+                    if (current === campus) renderDashboard(fresh, false);
+                }
+            }
         );
 
-        if (!response.ok) {
-            throw new Error(
-                `Dashboard request failed: ${response.status}`
-            );
-        }
-
-        const data = await response.json();
-
-        const statistics = data.statistics;
-
-        initializeCampusChart(data.campusVotes ?? []);
-
-        initializeSSCChart(data.sscVotes ?? []);
-
-        initializeDepartmentChart(data.departmentVotes ?? []);
-
-        const totalVoters =
-            statistics.totalVoters ?? 0;
-
-        const totalVoted =
-            statistics.totalVoted ?? 0;
-
-        const activeElection =
-            statistics.activeElection ?? 0;
-
-        const totalCandidates =
-            statistics.totalCandidates ?? 0;
-
-        const turnout =
-            totalVoters > 0
-                ? Math.round((totalVoted / totalVoters) * 100)
-                : 0;
-
-
-        animateNumber(
-            "totalVoters",
-            totalVoters
-        );
-
-        animateNumber(
-            "totalVoted",
-            totalVoted
-        );
-
-        animateNumber(
-            "activeElection",
-            activeElection
-        );
-
-        animateNumber(
-            "totalCandidates",
-            totalCandidates
-        );
-
-        animateNumber(
-            "turnout",
-            turnout,
-            "%"
-        );
+        renderDashboard(data, true);
 
     } catch (error) {
 
@@ -172,6 +123,37 @@ async function loadDashboardStatistics(campus = "all") {
         );
 
     }
+
+}
+
+function renderDashboard(data, animate = true) {
+
+    const statistics = data.statistics;
+
+    initializeCampusChart(data.campusVotes ?? []);
+
+    initializeSSCChart(data.sscVotes ?? []);
+
+    initializeDepartmentChart(data.departmentVotes ?? []);
+
+    const totalVoters = statistics.totalVoters ?? 0;
+    const totalVoted = statistics.totalVoted ?? 0;
+    const activeElection =
+        statistics.activeElections ?? statistics.activeElection ?? 0;
+    const totalCandidates = statistics.totalCandidates ?? 0;
+
+    const turnout =
+        totalVoters > 0
+            ? Math.round((totalVoted / totalVoters) * 100)
+            : 0;
+
+    const duration = animate ? 1000 : 1;
+
+    animateNumber("totalVoters", totalVoters, "", duration);
+    animateNumber("totalVoted", totalVoted, "", duration);
+    animateNumber("activeElection", activeElection, "", duration);
+    animateNumber("totalCandidates", totalCandidates, "", duration);
+    animateNumber("turnout", turnout, "%", duration);
 
 }
 
@@ -190,12 +172,12 @@ const campusData = {
 
     },
 
-    college: {
+    kaypian: {
 
-        name: "College",
+        name: "Kaypian",
 
         description:
-            "Voting activity for the College campus."
+            "Voting activity for the Kaypian campus."
 
     },
 
@@ -986,13 +968,28 @@ function initializeDepartmentChart(departmentVotes = []) {
 }
 
 /* ==========================================================
-   FUTURE API
+   REAL-TIME UPDATES
 ========================================================== */
 
-// async function loadDashboard() {
-//
-//     const response = await fetch("/api/dashboard");
-//
-//     const data = await response.json();
-//
-// }
+function connectDashboardSocket() {
+  if (typeof StompJs === "undefined" || typeof SockJS === "undefined") {
+    console.error("StompJs/SockJS not loaded — real-time dashboard updates disabled.");
+    return;
+  }
+
+  const client = new StompJs.Client({
+    webSocketFactory: () => new SockJS("/ws-analytics"),
+    reconnectDelay: 4000,
+    onConnect: () => {
+      // Superadmin views "all" or a single campus via the selector,
+      // so just re-fetch whatever campus is currently selected.
+      client.subscribe("/topic/dashboard", () => {
+          SoftCache.clear();
+          const campus = document.getElementById("campusSelect")?.value || "all";
+          loadDashboardStatistics(campus);
+        });
+    },
+  });
+
+  client.activate();
+}

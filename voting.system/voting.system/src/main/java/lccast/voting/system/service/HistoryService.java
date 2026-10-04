@@ -2,6 +2,8 @@ package lccast.voting.system.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import jakarta.servlet.http.HttpServletRequest;
 import lccast.voting.system.dto.*;
 import lccast.voting.system.model.*;
@@ -21,6 +23,8 @@ import lccast.voting.system.dto.*;
 import lccast.voting.system.model.*;
 import lccast.voting.system.repository.*;
 import lccast.voting.system.service.superadmin.VoterService;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 import java.time.Instant;
 import java.util.*;
@@ -56,7 +60,8 @@ public class HistoryService {
     private final CandidateRoleSyncService candidateRoleSyncService;
     private final PartylistService partylistService;
     private final DepartmentService departmentService;
-
+    private final ElectionSchoolYearGuard schoolYearGuard;
+    private final ElectionVoteSyncService voteSyncService;
 
     public HistoryService(
             VoteLogRepository voteLogRepository,
@@ -83,7 +88,9 @@ public class HistoryService {
             VoterService voterService,
             CandidateRoleSyncService candidateRoleSyncService,
             PartylistService partylistService,
-            DepartmentService departmentService
+            DepartmentService departmentService,
+            ElectionSchoolYearGuard schoolYearGuard,
+            ElectionVoteSyncService voteSyncService
     ) {
         this.voteLogRepository = voteLogRepository;
         this.campusRepository = campusRepository;
@@ -110,6 +117,8 @@ public class HistoryService {
         this.candidateRoleSyncService = candidateRoleSyncService;
         this.partylistService = partylistService;
         this.departmentService = departmentService;
+        this.schoolYearGuard = schoolYearGuard;
+        this.voteSyncService = voteSyncService;
     }
 
     // ======================================================
@@ -120,7 +129,7 @@ public class HistoryService {
             String search, String program, String section,
             String year, String category, UUID campusId, String sort, int page, boolean all
     ) {
-        Specification<VoteLog> spec = (root, query, cb) -> cb.conjunction();
+        Specification<VoteLog> spec = electionIsActive();
 
         if (search != null && !search.isBlank()) {
             String like = "%" + search.toLowerCase() + "%";
@@ -201,6 +210,20 @@ public class HistoryService {
         options.put("sections", voteLogRepository.findDistinctSections());
         options.put("yearLevels", voteLogRepository.findDistinctYearLevels());
         return options;
+    }
+
+    public List<String> getActionFilterOptions() {
+        return auditLogRepository.findDistinctActions().stream()
+                .map(Enum::name)
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    public List<String> getActionFilterOptionsForUser(UUID userId) {
+        return auditLogRepository.findDistinctActionsByUserId(userId).stream()
+                .map(Enum::name)
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     // ======================================================
@@ -291,6 +314,197 @@ public class HistoryService {
 
         messagingTemplate.convertAndSend("/topic/history/archives",
                 HistoryEventDTO.of("restored", id.toString()));
+    }
+
+    // ======================================================
+    // ARCHIVE DETAILS (organized view of the archived data)
+    // ======================================================
+
+    private static final DateTimeFormatter ARCHIVE_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a").withZone(ZoneId.of("Asia/Manila"));
+
+    public Map<String, Object> getArchiveDetails(UUID id) {
+        ArchiveRecord record = archiveRecordRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Archive record not found: " + id));
+
+        List<Map<String, String>> fields = new ArrayList<>();
+
+        try {
+            JsonNode node = objectMapper.readTree(record.getData());
+            if (node != null && node.isObject()) {
+                node.fields().forEachRemaining(entry -> {
+                    String key = entry.getKey();
+                    String lower = key.toLowerCase();
+
+                    // internal / sensitive keys are not shown
+                    if (lower.equals("id") || lower.contains("password") || lower.equals("authuserid")) return;
+
+                    String value = formatArchiveField(key, entry.getValue());
+                    if (value == null || value.isBlank()) return;
+
+                    Map<String, String> field = new LinkedHashMap<>();
+                    field.put("label", archiveLabel(key));
+                    field.put("value", value);
+                    fields.add(field);
+                });
+            }
+        } catch (Exception e) {
+            // unreadable snapshot -> return an empty field list instead of failing
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("entityType", record.getEntityType());
+        result.put("entityName", record.getEntityName());
+        result.put("fields", fields);
+        return result;
+    }
+
+    public Map<String, Object> getArchiveDetailsForAdminDept(UUID id, UUID userId) {
+        ArchiveRecord record = archiveRecordRepository.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Archive record not found: " + id));
+
+        if (!userId.equals(record.getArchivedBy())) {
+            throw new IllegalArgumentException("You are not authorized to view this record.");
+        }
+        return getArchiveDetails(id);
+    }
+
+    public Map<String, Object> getArchiveDetailsForAdminSsc(UUID id, UUID userId) {
+        return getArchiveDetailsForAdminDept(id, userId);
+    }
+
+    private String archiveLabel(String key) {
+        return switch (key) {
+            case "campusId" -> "Campus";
+            case "partylistIds" -> "Partylists";
+            case "departmentIds" -> "Departments";
+            case "partylistId" -> "Partylist";
+            case "departmentId" -> "Department";
+            case "createdBy" -> "Created By";
+            case "updatedBy" -> "Updated By";
+            default -> humanizeArchiveKey(key);
+        };
+    }
+
+    private String formatArchiveField(String key, JsonNode v) {
+        if (v == null || v.isNull()) return "";
+
+        // numeric timestamps (epoch seconds, or millis if very large)
+        if (v.isNumber() && (key.endsWith("At") || key.equals("timeVoted"))) {
+            return formatEpoch(v.asDouble());
+        }
+
+        if (key.equals("campusId") && v.isTextual()) {
+            return resolveCampusName(v.asText());
+        }
+
+        if ((key.equals("createdBy") || key.equals("updatedBy")
+                || key.equals("archivedBy") || key.equals("deletedBy")) && v.isTextual()) {
+            try {
+                String name = auditLogService.getUserName(UUID.fromString(v.asText()));
+                return (name == null || name.isBlank()) ? v.asText() : name;
+            } catch (IllegalArgumentException e) {
+                return v.asText();
+            }
+        }
+
+        if (key.equals("partylistIds") && v.isArray()) {
+            List<String> names = new ArrayList<>();
+            v.forEach(item -> names.add(resolvePartylistName(item.asText())));
+            return String.join(", ", names);
+        }
+
+        if (key.equals("departmentIds") && v.isArray()) {
+            List<String> names = new ArrayList<>();
+            v.forEach(item -> names.add(resolveDepartmentName(item.asText())));
+            return String.join(", ", names);
+        }
+
+        if (key.equals("partylistId") && v.isTextual()) return resolvePartylistName(v.asText());
+        if (key.equals("departmentId") && v.isTextual()) return resolveDepartmentName(v.asText());
+
+        return formatArchiveValue(v);
+    }
+
+    private String formatEpoch(double raw) {
+        try {
+            long millis = raw > 1e11 ? (long) raw : (long) (raw * 1000);
+            return ARCHIVE_DATE_FORMAT.format(Instant.ofEpochMilli(millis));
+        } catch (Exception e) {
+            return String.valueOf(raw);
+        }
+    }
+
+    private String resolvePartylistName(String id) {
+        try {
+            return partylistRepository.findById(UUID.fromString(id))
+                    .map(Partylist::getName)
+                    .orElse(id);
+        } catch (IllegalArgumentException e) {
+            return id;
+        }
+    }
+
+    private String resolveDepartmentName(String id) {
+        try {
+            return departmentRepository.findById(UUID.fromString(id))
+                    .map(Department::getTitle)
+                    .orElse(id);
+        } catch (IllegalArgumentException e) {
+            return id;
+        }
+    }
+
+    private String resolveCampusName(String campusId) {
+        try {
+            return campusRepository.findById(UUID.fromString(campusId))
+                    .map(Campus::getName)
+                    .orElse(campusId);
+        } catch (IllegalArgumentException e) {
+            return campusId;
+        }
+    }
+
+    private String humanizeArchiveKey(String key) {
+        String spaced = key.replaceAll("([a-z])([A-Z])", "$1 $2").replace('_', ' ').trim();
+        return spaced.isEmpty() ? key : Character.toUpperCase(spaced.charAt(0)) + spaced.substring(1);
+    }
+
+    private String formatArchiveValue(JsonNode value) {
+        if (value == null || value.isNull()) return "";
+
+        if (value.isTextual()) {
+            String text = value.asText();
+            if (text.matches("\\d{4}-\\d{2}-\\d{2}T.*")) {
+                try {
+                    return ARCHIVE_DATE_FORMAT.format(Instant.parse(text));
+                } catch (Exception ignored) { /* not an instant, show as-is */ }
+            }
+            return text;
+        }
+
+        if (value.isBoolean()) return value.asBoolean() ? "Yes" : "No";
+        if (value.isNumber()) return value.asText();
+
+        if (value.isArray()) {
+            List<String> parts = new ArrayList<>();
+            value.forEach(item -> {
+                String part = formatArchiveValue(item);
+                if (!part.isBlank()) parts.add(part);
+            });
+            return String.join(", ", parts);
+        }
+
+        if (value.isObject()) {
+            List<String> parts = new ArrayList<>();
+            value.fields().forEachRemaining(e -> {
+                String part = formatArchiveValue(e.getValue());
+                if (!part.isBlank()) parts.add(humanizeArchiveKey(e.getKey()) + ": " + part);
+            });
+            return String.join(" · ", parts);
+        }
+
+        return value.toString();
     }
 
     // ======================================================
@@ -440,9 +654,47 @@ public class HistoryService {
             case "Elections" -> {
                 Election election = electionRepository.findById(entityId)
                         .orElseThrow(() -> new NoSuchElementException("Election not found: " + entityId));
+
+                List<String> blockers = new ArrayList<>();
+
+                electionPartylistRepository.findByElectionId(entityId).stream()
+                        .map(ElectionPartylist::getPartylist)
+                        .filter(p -> p != null && p.getStatus() != RecordStatus.ACTIVE)
+                        .forEach(p -> blockers.add("Partylist \"" + p.getName() + "\""));
+
+                electionDepartmentRepository.findByElectionId(entityId).stream()
+                        .map(ElectionDepartment::getDepartment)
+                        .filter(d -> d != null && d.getStatus() != RecordStatus.ACTIVE)
+                        .forEach(d -> blockers.add("Department \"" + d.getTitle() + "\""));
+
+                if (!blockers.isEmpty()) {
+                    throw new IllegalStateException(
+                            "Cannot restore this election because the following are still archived or in trash: "
+                                    + String.join(", ", blockers)
+                                    + ". Restore them first, then restore the election."
+                    );
+                }
+
+
+                List<UUID> departmentIds = electionDepartmentRepository.findByElectionId(entityId).stream()
+                        .map(link -> link.getDepartment().getId())
+                        .toList();
+
+                schoolYearGuard.assertAvailable(
+                        election.getCategory(), election.getCampusId(),
+                        election.getSchoolYear(), departmentIds, entityId
+                );
+
                 election.setStatus(RecordStatus.ACTIVE);
                 election.setActive(true);
                 electionRepository.save(election);
+
+                voteSyncService.refreshVotersOfElection(entityId);   // <-- votes count again
+
+                List<String> candidateStudentIds = candidateRepository.findByElectionId(entityId).stream()
+                        .map(Candidate::getStudentId)
+                        .toList();
+                candidateRoleSyncService.promoteAll(candidateStudentIds);
             }
 
             default -> reinsertEntity(entityType, entityId, jsonData);
@@ -471,6 +723,8 @@ public class HistoryService {
 
         partylist.setStatus(RecordStatus.ACTIVE);
         partylistRepository.save(partylist);
+
+        members.forEach(m -> candidateRoleSyncService.promoteToCandidate(m.getStudentId()));
     }
 
     private void restoreDepartment(UUID id) {
@@ -486,6 +740,9 @@ public class HistoryService {
 
         department.setStatus(RecordStatus.ACTIVE);
         departmentRepository.save(department);
+
+        departmentMemberRepository.findByDepartmentId(id)
+                .forEach(m -> candidateRoleSyncService.promoteToCandidate(m.getStudentId()));
     }
 
     /**
@@ -533,18 +790,7 @@ public class HistoryService {
                 electionPartylistRepository.deleteByElectionId(entityId);
                 electionDepartmentRepository.deleteByElectionId(entityId);
 
-                for (UUID voterId : affectedVoterIds) {
-                    boolean hasOtherBallots = ballotRepository.existsByVoter_Id(voterId);
-
-                    if (!hasOtherBallots) {
-                        voterRepository.findById(voterId).ifPresent(voter -> {
-                            voter.setVotingStatus(VotingStatus.NOT_VOTED);
-                            voter.setTimeVoted(null);
-                            voter.setUpdatedAt(Instant.now());
-                            voterRepository.save(voter);
-                        });
-                    }
-                }
+                voteSyncService.refreshVoters(affectedVoterIds);
 
                 electionRepository.findById(entityId).ifPresent(electionRepository::delete);
                 candidateStudentIds.forEach(candidateRoleSyncService::demoteToVoterIfNoLongerCandidate);
@@ -607,7 +853,8 @@ public class HistoryService {
             UUID campusId, String programCourse,
             String search, String section, String year, String sort, int page, boolean all
     ) {
-        Specification<VoteLog> spec = (root, query, cb) -> cb.equal(root.get("campusId"), campusId);
+        Specification<VoteLog> spec = electionIsActive()
+                .and((root, query, cb) -> cb.equal(root.get("campusId"), campusId));
 
         spec = spec.and((root, q, cb) -> cb.equal(cb.upper(root.get("programCourse")), programCourse.toUpperCase()));
         spec = spec.and((root, q, cb) -> cb.equal(cb.upper(root.get("electionCategory")), "DEPARTMENT"));
@@ -824,7 +1071,8 @@ public class HistoryService {
             String search, String program, String section, String year,
             String category, String sort, int page, boolean all
     ) {
-        Specification<VoteLog> spec = (root, query, cb) -> cb.equal(root.get("campusId"), campusId);
+        Specification<VoteLog> spec = electionIsActive()
+                .and((root, query, cb) -> cb.equal(root.get("campusId"), campusId));
 
         if (search != null && !search.isBlank()) {
             String like = "%" + search.toLowerCase() + "%";
@@ -962,5 +1210,19 @@ public class HistoryService {
     @Transactional
     public void emptyTrashForAdminSsc(UUID userId, HttpServletRequest request) {
         emptyTrashForAdminDept(userId, request);
+    }
+
+    private Specification<VoteLog> electionIsActive() {
+        return (root, query, cb) -> {
+            Subquery<UUID> activeElection = query.subquery(UUID.class);
+            Root<Election> election = activeElection.from(Election.class);
+
+            activeElection.select(election.get("id")).where(
+                    cb.equal(election.get("id"), root.get("electionId")),
+                    cb.equal(election.get("status"), RecordStatus.ACTIVE)
+            );
+
+            return cb.exists(activeElection);
+        };
     }
 }

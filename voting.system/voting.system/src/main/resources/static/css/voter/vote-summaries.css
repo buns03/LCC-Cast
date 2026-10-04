@@ -14,6 +14,32 @@
     box-sizing: border-box;
 }
 
+/* =========================================================
+   INSTRUCTIONS
+========================================================= */
+
+.election-instructions {
+    padding: 22px 24px;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+}
+
+.election-instructions h3 {
+    margin: 0 0 7px;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.election-instructions p {
+    margin: 0;
+    max-width: 900px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--subtext);
+}
+
 
 /* ==========================================================
    PAGE HEADER
@@ -1072,7 +1098,19 @@
     }
 
     .voter-page-content .page-header h2 {
-        font-size: 24px;
+        font-size: 20px;
+    }
+
+    .voter-page-content .page-header p {
+        font-size: 12.5px;
+    }
+
+    .vote-summary-title h3 {
+        font-size: 15px;
+    }
+
+    .vote-summary-title p {
+        font-size: 12px;
     }
 
     .vote-summary-tabs {
@@ -1132,7 +1170,19 @@
 @media (max-width: 576px) {
 
     .voter-page-content .page-header h2 {
-        font-size: 21px;
+        font-size: 20px;
+    }
+
+    .voter-page-content .page-header p {
+        font-size: 12.5px;
+    }
+
+    .vote-summary-title h3 {
+        font-size: 15px;
+    }
+
+    .vote-summary-title p {
+        font-size: 12px;
     }
 
     .voter-page-content .page-header p {
@@ -1172,7 +1222,11 @@
     }
 
     .vote-summary-title h3 {
-        font-size: 16px;
+        font-size: 14px;
+    }
+
+    .voted-candidates-header h4 {
+        font-size: 13.5px;
     }
 
     .vote-summary-title p {
@@ -1306,6 +1360,14 @@
 ========================================================== */
 
 @media (max-width: 380px) {
+
+    .vote-summary-title h3 {
+        font-size: 14px;
+    }
+
+    .voted-candidates-header h4 {
+        font-size: 13.5px;
+    }
 
     .vote-summary-tab {
         padding: 0 5px;

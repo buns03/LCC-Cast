@@ -28,6 +28,10 @@ public class ElectionResponse {
 
     private String description;
 
+    private UUID parentElectionId;
+    private boolean drawElection;
+    private List<String> drawPositions;
+
     public UUID getId() {
         return id;
     }
@@ -147,4 +151,11 @@ public class ElectionResponse {
     public void setDescription(String description) {
         this.description = description;
     }
+
+    public UUID getParentElectionId() { return parentElectionId; }
+    public void setParentElectionId(UUID v) { this.parentElectionId = v; }
+    public boolean isDrawElection() { return drawElection; }
+    public void setDrawElection(boolean v) { this.drawElection = v; }
+    public List<String> getDrawPositions() { return drawPositions; }
+    public void setDrawPositions(List<String> v) { this.drawPositions = v; }
 }

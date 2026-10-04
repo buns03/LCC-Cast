@@ -81,7 +81,7 @@ public class AdminSscElectionService {
         Election existing = electionService.getById(id);
         assertOwnedByCampus(existing, campusId);
 
-        if (partylistIds == null || partylistIds.size() < 2) {
+        if (!existing.isDrawElection() && (partylistIds == null || partylistIds.size() < 2)) {
             throw new IllegalArgumentException("SSC election requires at least two partylists.");
         }
 
@@ -123,5 +123,11 @@ public class AdminSscElectionService {
         if (election.getCategory() != ElectionCategory.SSC) {
             throw new RuntimeException("Only SSC elections can be managed here.");
         }
+    }
+
+    public ElectionResponse scheduleDraw(UUID id, UUID campusId, Instant startAt, Instant endAt,
+                                         HttpServletRequest request) {
+        assertOwnedByCampus(electionService.getById(id), campusId);
+        return electionService.toResponse(electionService.scheduleDrawElection(id, startAt, endAt, request));
     }
 }

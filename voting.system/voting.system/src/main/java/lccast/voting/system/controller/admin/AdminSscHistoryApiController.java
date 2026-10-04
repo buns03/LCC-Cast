@@ -66,6 +66,11 @@ public class AdminSscHistoryApiController {
     // ACTIONS (OWN USER ONLY — ROLE COLUMN STILL POPULATED)
     // ==================================================
 
+    @GetMapping("/actions/filter-options")
+    public List<String> actionFilterOptions(HttpSession session) {
+        return historyService.getActionFilterOptionsForUser(sessionUserId(session));
+    }
+
     @GetMapping("/actions")
     public PageResponse<AuditLogDTO> actions(
             HttpSession session,
@@ -95,6 +100,11 @@ public class AdminSscHistoryApiController {
             @RequestParam(required = false, defaultValue = "1") int page
     ) {
         return historyService.getArchivesForAdminSsc(sessionUserId(session), search, type, page);
+    }
+
+    @GetMapping("/archives/{id}/details")
+    public Map<String, Object> archiveDetails(@PathVariable UUID id, HttpSession session) {
+        return historyService.getArchiveDetailsForAdminSsc(id, sessionUserId(session));
     }
 
     @PostMapping("/archives/{id}/restore")

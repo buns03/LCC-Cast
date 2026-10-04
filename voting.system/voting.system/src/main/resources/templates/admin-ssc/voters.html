@@ -10,7 +10,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <title>LCCast | Voters</title>
+    <title>LCC Cast | Voters</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
 
     <!-- SHARED CSS -->
     <link rel="stylesheet" href="/css/base.css" />
@@ -54,7 +58,7 @@ MOBILE NAVIGATION OVERLAY
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
         <div class="logo">
-            <img src="/images/lcccast_logo.png" alt="LCCast" />
+            <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
             <h2 >LCC Cast</h2>
         </div>
@@ -461,33 +465,6 @@ MOBILE NAVIGATION OVERLAY
                         ></div>
                     </div>
 
-                    <!-- CAMPUS -->
-
-<!--                    <div class="multi-filter-group">-->
-<!--                        <label>Campus</label>-->
-
-<!--                        <div class="multi-filter-options">-->
-<!--                            <label class="filter-check">-->
-<!--                                <input-->
-<!--                                        type="checkbox"-->
-<!--                                        value="College"-->
-<!--                                        data-filter-type="campus"-->
-<!--                                />-->
-
-<!--                                <span>College</span>-->
-<!--                            </label>-->
-
-<!--                            <label class="filter-check">-->
-<!--                                <input-->
-<!--                                        type="checkbox"-->
-<!--                                        value="Muzon"-->
-<!--                                        data-filter-type="campus"-->
-<!--                                />-->
-
-<!--                                <span>Muzon</span>-->
-<!--                            </label>-->
-<!--                        </div>-->
-<!--                    </div>-->
 
                     <!-- NAME SORT -->
 
@@ -495,6 +472,17 @@ MOBILE NAVIGATION OVERLAY
                         <label>Name</label>
 
                         <div class="multi-filter-options">
+                            <label class="filter-check">
+                                <input
+                                        type="radio"
+                                        name="nameSort"
+                                        value="default"
+                                        data-filter-type="nameSort"
+                                        checked
+                                />
+                                <span>Default</span>
+                            </label>
+
                             <label class="filter-check">
                                 <input
                                         type="radio"
@@ -525,6 +513,17 @@ MOBILE NAVIGATION OVERLAY
                         <label>Voting Time</label>
 
                         <div class="multi-filter-options">
+                            <label class="filter-check">
+                                <input
+                                        type="radio"
+                                        name="timeSort"
+                                        value="default"
+                                        data-filter-type="nameSort"
+                                        checked
+                                />
+                                <span>Default</span>
+                            </label>
+
                             <label class="filter-check">
                                 <input
                                         type="radio"
@@ -882,7 +881,7 @@ MOBILE NAVIGATION OVERLAY
 
             <h2>Logout?</h2>
 
-            <p>Are you sure you want to logout from LCCast?</p>
+            <p>Are you sure you want to logout from LCC Cast?</p>
         </div>
 
         <div class="modal-footer">
@@ -945,6 +944,9 @@ MOBILE NAVIGATION OVERLAY
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+<script src="/js/superadmin/soft-cache.js"></script>
 <script src="/js/navigation.js"></script>
 <script src="/js/logout.js"></script>
 

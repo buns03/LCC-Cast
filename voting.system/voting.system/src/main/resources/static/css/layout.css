@@ -471,86 +471,49 @@ LAPTOP / TABLET
 TABLET
 =========================================================*/
 
-@media (max-width:767px){
+@media (max-width:768px){
 
     body{
-
-        display:block;
-
-        height:auto;
-
-        min-height:100vh;
-
         overflow:auto;
-
+        display:block;
     }
 
     .sidebar{
-
         display:none;
-
     }
 
     .main-content{
-
         width:100%;
-
-        min-height:100vh;
-
         height:auto;
-
         overflow:visible;
-
-        padding:18px 16px 30px;
-
+        padding:16px;
     }
 
     .topbar{
-
-        align-items:flex-start;
-
-        gap:16px;
-
-        margin-bottom:20px;
-
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 20px;
     }
 
     .topbar h1{
-
-        font-size:27px;
-
+        font-size: 20px;
     }
 
     .topbar p{
-
-        font-size:13px;
-
+        font-size: 12.5px;
     }
 
     .profile{
-
-        padding:7px 10px;
-
-        gap:9px;
-
-        border-radius:14px;
-
+        padding: 8px 12px;
     }
 
-    .avatar{
-
-        width:38px;
-
-        height:38px;
-
+    .profile-info span{
+        font-size: 13px;
     }
 
-    .profile span{
-
-        font-size:13px;
-
+    .profile-info small{
+        font-size: 10.5px;
     }
-
 }
 
 
@@ -621,44 +584,17 @@ PHONE
 VERY SMALL PHONE
 =========================================================*/
 
-@media (max-width:400px){
-
-    .main-content{
-
-        padding:12px 10px 20px;
-
-    }
+@media (max-width:480px){
 
     .topbar h1{
-
-        font-size:22px;
-
+        font-size: 18px;
     }
 
     .topbar p{
-
-        font-size:11px;
-
+        font-size: 12px;
     }
 
-    .profile{
-
-        padding:7px 9px;
-
+    .main-content{
+        padding: 14px;
     }
-
-    .avatar{
-
-        width:34px;
-
-        height:34px;
-
-    }
-
-    .profile span{
-
-        font-size:11px;
-
-    }
-
-}}
+}

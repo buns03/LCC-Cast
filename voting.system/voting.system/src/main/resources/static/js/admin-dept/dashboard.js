@@ -8,7 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setCurrentDate();
     setActiveSidebar();
     loadDashboardStatistics();
-
+    connectDashboardSocket();
 });
 
 /* ==========================================================
@@ -83,43 +83,39 @@ function setActiveSidebar() {
    the server-side session, never from the client.
 ========================================================== */
 
-async function loadDashboardStatistics() {
-
+async function loadDashboardStatistics(force = false) {
     try {
-
-        const response = await fetch("/admin-dept/api/dashboard");
-
-        if (!response.ok) {
-            throw new Error(`Dashboard request failed: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const statistics = data.statistics;
-
-        initializeDepartmentChart(data.departmentVotes ?? []);
-
-        const totalVoters = statistics.totalVoters ?? 0;
-        const totalVoted = statistics.totalVoted ?? 0;
-        const activeElection = statistics.activeElection ?? 0;
-        const totalCandidates = statistics.totalCandidates ?? 0;
-
-        const turnout =
-            totalVoters > 0
-                ? Math.round((totalVoted / totalVoters) * 100)
-                : 0;
-
-        animateNumber("totalVoters", totalVoters);
-        animateNumber("totalVoted", totalVoted);
-        animateNumber("activeElection", activeElection);
-        animateNumber("totalCandidates", totalCandidates);
-        animateNumber("turnout", turnout, "%");
-
+        const data = await SoftCache.load("/admin-dept/api/dashboard", {
+            force,
+            onRevalidated: applyDashboardData
+        });
+        applyDashboardData(data);
     } catch (error) {
-
         console.error("Failed to load dashboard statistics:", error);
-
     }
+}
 
+function applyDashboardData(data) {
+    const statistics = data.statistics;
+
+    initializeDepartmentChart(data.departmentVotes ?? []);
+
+    const totalVoters = statistics.totalVoters ?? 0;
+    const totalVoted = statistics.totalVoted ?? 0;
+    const activeElection =
+        statistics.activeElections ?? statistics.activeElection ?? 0;
+    const totalCandidates = statistics.totalCandidates ?? 0;
+
+    const turnout =
+        totalVoters > 0
+            ? Math.round((totalVoted / totalVoters) * 100)
+            : 0;
+
+    animateNumber("totalVoters", totalVoters);
+    animateNumber("totalVoted", totalVoted);
+    animateNumber("activeElection", activeElection);
+    animateNumber("totalCandidates", totalCandidates);
+    animateNumber("turnout", turnout, "%");
 }
 
 /* ==========================================================
@@ -238,3 +234,41 @@ function initializeDepartmentChart(departmentVotes = []) {
     });
 
 }
+
+/* ==========================================================
+   REAL-TIME UPDATES
+========================================================== */
+
+function connectDashboardSocket() {
+    if (typeof SockJS === "undefined") {
+        console.error("SockJS not loaded — real-time dashboard updates disabled.");
+        return;
+    }
+
+    const campusId = document.body.dataset.adminCampusId || "";
+    const departmentCode = document.body.dataset.adminDepartmentCode || "";
+
+    if (!campusId || !departmentCode) {
+        console.error("Missing adminCampusId/adminDepartmentCode on <body> — cannot scope dashboard socket.");
+        return;
+    }
+
+    const topic = `/topic/dashboard/${campusId}/${departmentCode}`;
+
+    if (typeof StompJs !== "undefined") {
+        const client = new StompJs.Client({
+            webSocketFactory: () => new SockJS("/ws-analytics"),
+            reconnectDelay: 4000,
+        });
+        client.onConnect = () => client.subscribe(topic, () => loadDashboardStatistics(true));
+        client.activate();
+    } else if (typeof Stomp !== "undefined") {
+        const socket = new SockJS("/ws-analytics");
+        const client = Stomp.over(socket);
+        client.debug = () => {};
+        client.connect({}, () => client.subscribe(topic, () => loadDashboardStatistics(true)));
+    } else {
+        console.error("No STOMP client library found — real-time dashboard updates disabled.");
+    }
+}
+

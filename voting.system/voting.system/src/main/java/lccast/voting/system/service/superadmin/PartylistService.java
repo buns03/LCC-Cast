@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lccast.voting.system.service.CandidatePortalService;
 import lccast.voting.system.service.CandidateRoleSyncService;
+import lccast.voting.system.service.RealtimeBroadcastService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +38,8 @@ public class PartylistService {
     private final VoterRepository voterRepository;
     private final CandidateRoleSyncService candidateRoleSyncService;
     private final CandidatePortalService candidatePortalService;   // ADD THIS
+    private final ElectionPartylistRepository electionPartylistRepository;
+    private final RealtimeBroadcastService realtime;
 
     public PartylistService(
             PartylistRepository partylistRepository,
@@ -48,7 +51,9 @@ public class PartylistService {
             AuditLogService auditLogService,
             VoterRepository voterRepository,
             CandidateRoleSyncService candidateRoleSyncService,
-            CandidatePortalService candidatePortalService
+            CandidatePortalService candidatePortalService,
+            ElectionPartylistRepository electionPartylistRepository,
+            RealtimeBroadcastService realtime
     ) {
         this.partylistRepository = partylistRepository;
         this.partylistMemberRepository = partylistMemberRepository;
@@ -60,6 +65,8 @@ public class PartylistService {
         this.voterRepository = voterRepository;
         this.candidateRoleSyncService = candidateRoleSyncService;
         this.candidatePortalService = candidatePortalService;
+        this.electionPartylistRepository = electionPartylistRepository;
+        this.realtime = realtime;
     }
 
     // =========================================================
@@ -98,6 +105,23 @@ public class PartylistService {
 
     public List<PartylistMember> getMembers(UUID partylistId) {
         return partylistMemberRepository.findByPartylistId(partylistId);
+    }
+
+    private void assertNotLinkedToActiveElection(UUID partylistId) {
+        Instant now = Instant.now();
+
+        boolean linkedToActiveElection = electionPartylistRepository.findByPartylistId(partylistId).stream()
+                .map(ElectionPartylist::getElection)
+                .filter(java.util.Objects::nonNull)
+                .filter(election -> election.getStatus() == RecordStatus.ACTIVE)
+                .anyMatch(election -> election.getEndAt() == null || !now.isAfter(election.getEndAt()));
+
+        if (linkedToActiveElection) {
+            throw new IllegalStateException(
+                    "This partylist is part of an active or upcoming election and cannot be archived or deleted. " +
+                            "Archive or delete that election first, or wait until it concludes."
+            );
+        }
     }
 
     // =========================================================
@@ -158,6 +182,8 @@ public class PartylistService {
                 "Created partylist: " + saved.getName(),
                 null
         );
+
+        realtime.partylistsChanged(saved.getCampus().getId());
 
         return saved;
     }
@@ -226,7 +252,7 @@ public class PartylistService {
 
         for (String oldId : oldStudentIds) {
             if (!newStudentIds.contains(oldId)) {
-                candidateRoleSyncService.demoteToVoterIfNoLongerCandidate(oldId);
+                candidateRoleSyncService.demoteSscMember(oldId);
             }
         }
 
@@ -234,6 +260,9 @@ public class PartylistService {
                 request, AuditAction.UPDATE, "Partylists", saved.getId(),
                 "Updated partylist: " + saved.getName(), null
         );
+
+        realtime.partylistsChanged(saved.getCampus().getId());
+
         return saved;
     }
 
@@ -335,7 +364,7 @@ public class PartylistService {
 
             if (member.getPhotoImageUrl() == null && member.getBackgroundImageUrl() == null
                     && member.getCampaignImageUrl() == null) {
-                var existing = candidatePortalService.findExistingImages(studentId);
+                var existing = candidatePortalService.findExistingImages(studentId, CandidatePortalService.CandidateType.SSC);
                 if (existing != null) {
                     member.setPhotoImageUrl(existing.photoImageUrl);
                     member.setBackgroundImageUrl(existing.backgroundImageUrl);
@@ -380,133 +409,87 @@ public class PartylistService {
     // ARCHIVE
     // =========================================================
 
-    public void archive(
-            UUID id,
-            HttpServletRequest request
-    ) {
-
+    public void archive(UUID id, HttpServletRequest request) {
         Partylist partylist = getById(id);
-
         if (partylist.getStatus() != RecordStatus.ACTIVE) {
-            throw new RuntimeException(
-                    "Only active partylists can be archived"
-            );
+            throw new RuntimeException("Only active partylists can be archived");
         }
+
+        assertNotLinkedToActiveElection(id);
 
         createArchiveRecord(partylist, request);
 
+        List<String> memberStudentIds = partylistMemberRepository.findByPartylistId(id).stream()
+                .map(PartylistMember::getStudentId)
+                .toList();
 
-
-        partylist.setStatus(
-                RecordStatus.ARCHIVED
-        );
-
+        partylist.setStatus(RecordStatus.ARCHIVED);
         partylistRepository.save(partylist);
 
-        auditLogService.log(
-                request,
-                AuditAction.ARCHIVE,
-                "Partylists",
-                partylist.getId(),
-                "Archived partylist: " +
-                        partylist.getName(),
-                null
-        );
+        candidateRoleSyncService.demoteSscMembers(memberStudentIds);
+
+        auditLogService.log(request, AuditAction.ARCHIVE, "Partylists", partylist.getId(),
+                "Archived partylist: " + partylist.getName(), null);
+
+        realtime.partylistsChanged(partylist.getCampus().getId());
+        realtime.historyChanged("archives");
     }
 
-    // =========================================================
-    // DELETE / TRASH
-    // =========================================================
-
-    public void delete(
-            UUID id,
-            HttpServletRequest request
-    ) {
-
+    public void delete(UUID id, HttpServletRequest request) {
         Partylist partylist = getById(id);
-
-        if (partylist.getStatus() ==
-                RecordStatus.DELETED) {
-
-            throw new RuntimeException(
-                    "Partylist is already deleted"
-            );
+        if (partylist.getStatus() == RecordStatus.DELETED) {
+            throw new RuntimeException("Partylist is already deleted");
         }
+
+        assertNotLinkedToActiveElection(id);
 
         createTrashRecord(partylist, request);
 
-        partylist.setStatus(
-                RecordStatus.DELETED
-        );
+        List<String> memberStudentIds = partylistMemberRepository.findByPartylistId(id).stream()
+                .map(PartylistMember::getStudentId)
+                .toList();
 
+        partylist.setStatus(RecordStatus.DELETED);
         partylistRepository.save(partylist);
 
-        auditLogService.log(
-                request,
-                AuditAction.DELETE,
-                "Partylists",
-                partylist.getId(),
-                "Moved partylist to trash: " +
-                        partylist.getName(),
-                null
-        );
+        candidateRoleSyncService.demoteSscMembers(memberStudentIds);
+
+        auditLogService.log(request, AuditAction.DELETE, "Partylists", partylist.getId(),
+                "Moved partylist to trash: " + partylist.getName(), null);
+
+        realtime.partylistsChanged(partylist.getCampus().getId());
+        realtime.historyChanged("trash");
     }
 
-    // =========================================================
-    // RESTORE
-    // =========================================================
-
-    public void restore(
-            UUID id,
-            HttpServletRequest request
-    ) {
-
+    public void restore(UUID id, HttpServletRequest request) {
         Partylist partylist = getById(id);
-
-        if (partylist.getStatus() != RecordStatus.DELETED &&
-                partylist.getStatus() != RecordStatus.ARCHIVED) {
-
-            throw new RuntimeException(
-                    "Partylist cannot be restored"
-            );
+        if (partylist.getStatus() != RecordStatus.DELETED && partylist.getStatus() != RecordStatus.ARCHIVED) {
+            throw new RuntimeException("Partylist cannot be restored");
         }
-
         if (partylistRepository.existsByNameIgnoreCaseAndStatusAndIdNot(
-                partylist.getName().trim(),
-                RecordStatus.ACTIVE,
-                id
-        )) {
-            throw new IllegalArgumentException(
-                    "A partylist with the same name already exists."
-            );
+                partylist.getName().trim(), RecordStatus.ACTIVE, id)) {
+            throw new IllegalArgumentException("A partylist with the same name already exists.");
         }
 
-        partylist.setStatus(
-                RecordStatus.ACTIVE
-        );
+        partylist.setStatus(RecordStatus.ACTIVE);
 
-
-        validateMembers(
-                partylist.getId(),
-                partylist.getCampus().getId(),
-                partylist.getSchoolYear(),
-                partylistMemberRepository.findByPartylistId(partylist.getId())
-        );
+        validateMembers(partylist.getId(), partylist.getCampus().getId(),
+                partylist.getSchoolYear(), partylistMemberRepository.findByPartylistId(partylist.getId()));
 
         partylistRepository.save(partylist);
+
+        List<String> memberStudentIds = partylistMemberRepository.findByPartylistId(id).stream()
+                .map(PartylistMember::getStudentId)
+                .toList();
+        candidateRoleSyncService.promoteAll(memberStudentIds);
 
         restoreArchiveRecord(id);
         restoreTrashRecord(id);
 
-        auditLogService.log(
-                request,
-                AuditAction.RESTORE,
-                "Partylists",
-                partylist.getId(),
-                "Restored partylist: " +
-                        partylist.getName(),
-                null
-        );
+        auditLogService.log(request, AuditAction.RESTORE, "Partylists", partylist.getId(),
+                "Restored partylist: " + partylist.getName(), null);
+
+        realtime.partylistsChanged(partylist.getCampus().getId());
     }
 
     // =========================================================
@@ -532,7 +515,7 @@ public class PartylistService {
 
         partylistRepository.delete(partylist);
 
-        studentIds.forEach(candidateRoleSyncService::demoteToVoterIfNoLongerCandidate);
+        candidateRoleSyncService.demoteSscMembers(studentIds);
     }
 
     // =========================================================

@@ -15,6 +15,18 @@ public class CustomUserDetails implements UserDetails {
         this.profile = profile;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof CustomUserDetails other)) return false;
+        return getUsername() != null && getUsername().equals(other.getUsername());
+    }
+
+    @Override
+    public int hashCode() {
+        return getUsername() != null ? getUsername().hashCode() : 0;
+    }
+
     public UserProfile getProfile() {
         return profile;
     }

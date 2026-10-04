@@ -84,8 +84,7 @@ function initializeDeleteDiscardModals() {
         );
 
         try {
-                    const response = await fetch(
-                        `${DEPARTMENT_API}/${departmentId}/archive`,
+                    const response = await fetch(`${DEPARTMENT_API}/${departmentId}/archive`,
                         {
                             method: "PUT",
                             headers: {

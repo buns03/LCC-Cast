@@ -32,26 +32,22 @@ public class LiveResultsBroadcaster {
     }
 
     public void broadcast() {
-        Map<String, Object> payload = Map.of(
-                "ssc", liveResultsService.getSscLiveResults(),
-                "departments", liveResultsService.getDepartmentLiveResults()
-        );
-        messagingTemplate.convertAndSend("/topic/live-results", (Object) payload);
-
-        broadcastDepartmentScoped();
-    }
-
-    private void broadcastDepartmentScoped() {
+        List<EntityResultDTO> ssc = liveResultsService.getSscLiveResults();
         List<EntityResultDTO> departments = liveResultsService.getDepartmentLiveResults();
 
+        messagingTemplate.convertAndSend("/topic/live-results",
+                (Object) Map.of("ssc", ssc, "departments", departments));
+
+        broadcastDepartmentScoped(departments);
+    }
+
+    private void broadcastDepartmentScoped(List<EntityResultDTO> departments) {
         for (EntityResultDTO dept : departments) {
             if (dept.getDepartmentIds() == null || dept.getDepartmentIds().isEmpty()) continue;
 
             for (String departmentId : dept.getDepartmentIds()) {
-                String topic = "/topic/live-results/department/"
-                        + dept.getCampusId() + "/" + departmentId;
-
-                messagingTemplate.convertAndSend(topic, dept);
+                messagingTemplate.convertAndSend(
+                        "/topic/live-results/department/" + dept.getCampusId() + "/" + departmentId, dept);
             }
         }
     }

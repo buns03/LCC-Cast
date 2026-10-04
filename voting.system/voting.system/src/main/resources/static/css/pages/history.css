@@ -326,7 +326,7 @@
     width: 100%;
     table-layout: fixed;
     border-collapse: collapse;
-    min-width: 900px;
+    min-width: 1100px;
 }
 
 /* VOTE LOGS COLUMNS */
@@ -441,7 +441,7 @@
 
     gap: 12px;
 
-    min-width: 200px;
+    min-width: 0;
 
 }
 
@@ -3001,6 +3001,49 @@
 
 }
 
+.archive-details-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fafbfd;
+}
+
+.archive-details-row {
+  display: grid;
+  grid-template-columns: 38% 1fr;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.archive-details-row:last-child {
+  border-bottom: none;
+}
+
+.archive-details-row dt {
+  margin: 0;
+  font-weight: 600;
+  color: var(--subtext);
+}
+
+.archive-details-row dd {
+  margin: 0;
+  color: var(--text);
+  word-break: break-word;
+}
+
+@media (max-width: 600px) {
+  .archive-details-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 
 /* ==========================================================
    RESPONSIVE
@@ -3582,6 +3625,30 @@
 
     }
 
+    .history-section-header h2 {
+        font-size: 17px;
+    }
+
+    .history-section-header p {
+        font-size: 12.5px;
+    }
+
+    .history-card-header h3 {
+        font-size: 14.5px;
+    }
+
+    .archive-view-header h2 {
+        font-size: 18px;
+    }
+
+    .action-details-header h2 {
+        font-size: 17px;
+    }
+
+    .action-details-subtitle {
+        font-size: 12px;
+    }
+
 }
 
 
@@ -3621,6 +3688,14 @@
 
         gap: 6px;
 
+    }
+
+    .history-section-header h2 {
+        font-size: 16px;
+    }
+
+    .history-card-header h3 {
+        font-size: 14px;
     }
 
 }

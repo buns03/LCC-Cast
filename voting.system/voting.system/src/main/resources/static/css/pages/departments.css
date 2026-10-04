@@ -2277,26 +2277,6 @@
    RESPONSIVE
 ========================================================= */
 
-@media(max-width:850px) {
-
-    .member-file-preview {
-
-        position: fixed;
-
-        left: 50%;
-
-        right: auto;
-
-        top: 50%;
-
-        transform: translate(-50%, -50%);
-
-        width: min(400px, calc(100vw - 30px));
-
-    }
-
-}
-
 
 @media (max-width: 1000px) {
 
@@ -2346,6 +2326,31 @@
         gap: 14px;
 
     }
+
+     .member-file-preview {
+
+            position: fixed;
+
+            left: 50%;
+
+            right: auto;
+
+            top: 50%;
+
+            transform: translate(-50%, -50%);
+
+            width: min(400px, calc(100vw - 30px));
+
+        }
+
+        .members-section h3,
+        .positions-section h3 {
+            font-size: 16px;
+        }
+
+        .departments-item-title h3 {
+            font-size: 14.5px;
+        }
 
 }
 
@@ -2400,6 +2405,15 @@
 
         margin-top: 4px;
 
+    }
+
+    .members-section h3,
+    .positions-section h3 {
+        font-size: 15px;
+    }
+
+    .departments-item-title h3 {
+        font-size: 14px;
     }
 
 

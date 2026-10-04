@@ -4,12 +4,15 @@ import jakarta.servlet.http.HttpSession;
 import lccast.voting.system.model.Department;
 import lccast.voting.system.model.Voter;
 import lccast.voting.system.repository.VoterRepository;
+import lccast.voting.system.service.CandidatePortalService;
 import lccast.voting.system.service.student.VoterDepartmentElectionService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 @Controller
@@ -18,13 +21,16 @@ public class DepartmentElectionController {
 
     private final VoterRepository voterRepository;
     private final VoterDepartmentElectionService voterDepartmentElectionService;
+    private final CandidatePortalService candidatePortalService;
 
     public DepartmentElectionController(
             VoterRepository voterRepository,
-            VoterDepartmentElectionService voterDepartmentElectionService
+            VoterDepartmentElectionService voterDepartmentElectionService,
+            CandidatePortalService candidatePortalService
     ) {
         this.voterRepository = voterRepository;
         this.voterDepartmentElectionService = voterDepartmentElectionService;
+        this.candidatePortalService = candidatePortalService;
     }
 
     @GetMapping("/department-election")
@@ -43,6 +49,7 @@ public class DepartmentElectionController {
         model.addAttribute("role", role);
         model.addAttribute("programCourse", programCourse);
         model.addAttribute("campus", campus);
+        model.addAttribute("avatarUrl", resolveAvatarUrl((String) session.getAttribute("userId"))); // ADD
 
         // Resolve the voter's real department — no assumed/default type.
         Department department = resolveDepartmentForSession(session);
@@ -58,6 +65,17 @@ public class DepartmentElectionController {
         }
 
         return "voter/department-election.html";
+    }
+
+    private String resolveAvatarUrl(String authUserIdStr) {
+        if (authUserIdStr == null) {
+            return null;
+        }
+        String storagePath = candidatePortalService.findAvatarStoragePath(UUID.fromString(authUserIdStr));
+        if (storagePath == null) {
+            return null;
+        }
+        return "/api/storage/file?path=" + URLEncoder.encode(storagePath, StandardCharsets.UTF_8);
     }
 
     private Department resolveDepartmentForSession(HttpSession session) {

@@ -9,7 +9,10 @@ document.addEventListener("DOMContentLoaded", initializeVoters);
 ========================================================= */
 const VOTER_API = "/admin-dept/api/voters";
 
-const voters = [];
+let voters = []; // now holds only the CURRENT PAGE
+let votersRequestId = 0;
+let totalPages = 1;
+let totalElements = 0;
 
 /* =========================================================
    STATE
@@ -70,12 +73,58 @@ function initializeVoters() {
   initializeActionLoadingModal();
   initializeSearch();
   initializeFiltersPanel();
-  populateMultiSectionFilter();
+  loadFacets();
   initializePagination();
   initializeExport();
   initializeImport();
   initializeDeleteAndArchive();
   loadVoters();
+}
+
+async function loadFacets() {
+  try {
+    const data = await SoftCache.load(`${VOTER_API}/facets`, { ttl: 300000 });
+    renderSectionFilterOptions(data.sections || []);
+    renderYearFilterOptions(data.yearLevels || []);
+  } catch (e) {
+    console.error("Failed to load filter facets:", e);
+  }
+}
+
+function renderSectionFilterOptions(sections) {
+  const container = $("multiSectionOptions");
+  if (!container) return;
+  container.innerHTML = "";
+  sections.forEach((section) => {
+    const label = document.createElement("label");
+    label.className = "filter-check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = section;
+    input.dataset.filterType = "section";
+    const span = document.createElement("span");
+    span.textContent = section;
+    label.append(input, span);
+    container.appendChild(label);
+  });
+}
+
+function renderYearFilterOptions(years) {
+  const container = $("multiYearOptions"); // adjust id if your panel uses a different one
+  if (!container) return;
+  container.innerHTML = "";
+  years.forEach((year) => {
+    const label = document.createElement("label");
+    label.className = "filter-check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = year;
+    input.dataset.filterType = "year";
+    const span = document.createElement("span");
+    span.textContent = year;
+    label.append(input, span);
+    container.appendChild(label);
+  });
 }
 
 /* =========================================================
@@ -112,11 +161,13 @@ function initializeSearch() {
   const autocomplete = $("autocompleteList");
   if (!input || !autocomplete) return;
 
+  let debounceTimer;
   input.addEventListener("input", () => {
     voterState.search = input.value.trim().toLowerCase();
     voterState.page = 1;
     renderAutocomplete();
-    renderVoters();
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(loadVoters, 300);   // CHANGED — was renderVoters()
   });
 
   input.addEventListener("focus", renderAutocomplete);
@@ -187,7 +238,7 @@ function initializeFiltersPanel() {
     voterState.page = 1;
     panel.classList.remove("show");
     button.classList.remove("active");
-    renderVoters();
+    loadVoters();
   });
 
   $("filtersClearBtn")?.addEventListener("click", clearAllFilters);
@@ -199,14 +250,9 @@ function initializeFiltersPanel() {
     }
   });
 
-  panel.addEventListener("change", (e) => {
-    // Program changes rebuild the Section list immediately.
-    if (e.target.matches('input[data-filter-type="program"]')) {
-      populateMultiSectionFilter();
-      return;
-    }
-    updatePendingFilterCount();
-  });
+    panel.addEventListener("change", () => {
+      updatePendingFilterCount();
+    });
 }
 
 function applySelectedFilters() {
@@ -243,8 +289,8 @@ function updatePendingFilterCount() {
     (sum, type) => sum + panel.querySelectorAll(`input[data-filter-type="${type}"]:checked`).length,
     0
   );
-  if (panel.querySelector('input[name="nameSort"]:checked')) count++;
-  if (panel.querySelector('input[name="timeSort"]:checked')) count++;
+  if (panel.querySelector('input[name="nameSort"]:checked:not([value="default"])')) count++;
+  if (panel.querySelector('input[name="timeSort"]:checked:not([value="default"])')) count++;
 
   selectedText.textContent = `${count} selected`;
 }
@@ -264,8 +310,12 @@ function clearAllFilters() {
   const panel = $("filtersPanel");
   if (!panel) return;
 
-  panel.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach((input) => {
+    panel.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach((input) => {
     input.checked = false;
+  });
+
+  panel.querySelectorAll('input[type="radio"][value="default"]').forEach((input) => {
+    input.checked = true;
   });
 
   FILTER_TYPES.forEach((type) => (voterState[type] = []));
@@ -274,7 +324,49 @@ function clearAllFilters() {
   voterState.page = 1;
 
   updateFilterCount();
-  renderVoters();
+  loadVoters();
+}
+
+/* =========================================================
+   SORTING (Name / Voting Time)
+========================================================= */
+
+function getLatestVoteTime(voter) {
+  const times = [voter.sscTime, voter.departmentTime]
+    .filter(Boolean)
+    .map((t) => new Date(t).getTime())
+    .filter((t) => !isNaN(t));
+  return times.length ? Math.max(...times) : null;
+}
+
+function applyClientSort(list) {
+  const sorted = [...list];
+  const byTime = voterState.timeSort;
+  const byName = voterState.nameSort;
+
+  if (byTime === "default" && byName === "default") return sorted;
+
+  sorted.sort((a, b) => {
+    if (byTime !== "default") {
+      const ta = getLatestVoteTime(a);
+      const tb = getLatestVoteTime(b);
+
+      if (ta !== tb) {
+        if (ta === null) return 1;   // not voted always goes last
+        if (tb === null) return -1;
+        return byTime === "Newest" ? tb - ta : ta - tb;
+      }
+    }
+
+    if (byName !== "default") {
+      const cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      return byName === "A-Z" ? cmp : -cmp;
+    }
+
+    return 0;
+  });
+
+  return sorted;
 }
 
 function normalizeBackendVoter(voter) {
@@ -318,57 +410,39 @@ function hideVotersSkeleton() {
 }
 
 async function loadVoters() {
-showVotersSkeleton();
+  const requestId = ++votersRequestId;
+  showVotersSkeleton();
   try {
-    const response = await fetch(VOTER_API, {
-      method: "GET",
-      headers: {
-        Accept: "application/json"
-      },
-      credentials: "same-origin"
+    const params = new URLSearchParams({
+      page: String(voterState.page - 1),
+      size: String(voterState.perPage),
     });
 
-    const result = await response.json();
+    if (voterState.section.length === 1) params.set("section", voterState.section[0]);
+    if (voterState.year.length === 1) params.set("yearLevel", voterState.year[0]);
+    if (voterState.search) params.set("search", voterState.search);
+    if (voterState.nameSort !== "default") params.set("nameSort", voterState.nameSort);
+    if (voterState.timeSort !== "default") params.set("timeSort", voterState.timeSort);
+    if (voterState.departmentStatus.length === 1) params.set("departmentStatus", voterState.departmentStatus[0]);
 
-    console.log("VOTERS API STATUS:", response.status);
-    console.log("VOTERS API DATA:", result);
-
-    if (!response.ok) {
-      throw new Error(
-        result?.message ||
-        `Failed to load voters. HTTP ${response.status}`
-      );
-    }
-
-    const data = Array.isArray(result)
-      ? result
-      : Array.isArray(result.data)
-        ? result.data
-        : [];
-
-    voters.length = 0;
-
-    data.forEach((voter) => {
-      voters.push(normalizeBackendVoter(voter));
+    const result = await SoftCache.load(`${VOTER_API}/page?${params.toString()}`, {
+      ttl: 20000,
+      swr: false,
     });
 
-    console.log("NORMALIZED VOTERS:", voters);
+    if (requestId !== votersRequestId) return; // a newer request has already started — drop this stale response
 
-    populateMultiSectionFilter();
-    updateFilterCount();
+    voters = (result.content || []).map(normalizeBackendVoter);
+    totalPages = result.totalPages || 1;
+    totalElements = result.totalElements || 0;
+
     renderVoters();
-
   } catch (error) {
+    if (requestId !== votersRequestId) return; // stale error — a newer request superseded this one
     console.error("Failed to load voters:", error);
-
-    showVotersStatusModal(
-      "error",
-      "Failed to Load Voters",
-      error.message || "Unable to load voter records."
-    );
-
+    showVotersStatusModal("error", "Failed to Load Voters", error.message || "Unable to load voter records.");
   } finally {
-    hideVotersSkeleton()
+    if (requestId === votersRequestId) hideVotersSkeleton();
   }
 }
 
@@ -380,59 +454,28 @@ function initializePagination() {
   $("previousPage")?.addEventListener("click", () => {
     if (voterState.page <= 1) return;
     voterState.page--;
-    renderVoters();
+    loadVoters();
   });
 
   $("nextPage")?.addEventListener("click", () => {
-    if (voterState.page >= getTotalPages()) return;
+    if (voterState.page >= totalPages) return;   // CHANGED — was getTotalPages()
     voterState.page++;
-    renderVoters();
+    loadVoters();
   });
 }
 
-function getTotalPages() {
-  return Math.max(1, Math.ceil(getFilteredVoters().length / voterState.perPage));
-}
 
-function updatePagination(totalPages) {
+function updatePagination() {                    // CHANGED — no param
   const previous = $("previousPage");
   const next = $("nextPage");
-
   if ($("paginationText")) $("paginationText").textContent = `Page ${voterState.page} / ${totalPages}`;
   if (previous) previous.disabled = voterState.page <= 1;
   if (next) next.disabled = voterState.page >= totalPages;
 }
-
 /* =========================================================
    FILTER + SORT DATA
 ========================================================= */
 
-function getFilteredVoters() {
-  let result = voters.filter((v) => !v.archived);
-
-  if (voterState.search) {
-    const search = voterState.search;
-    result = result.filter((v) => [v.name, v.id, v.program].some((f) => f.toLowerCase().includes(search)));
-  }
-
-  FILTER_TYPES.forEach((type) => {
-    if (voterState[type].length) result = result.filter((v) => voterState[type].includes(v[type]));
-  });
-
-  if (voterState.nameSort === "A-Z") result.sort((a, b) => a.name.localeCompare(b.name));
-  if (voterState.nameSort === "Z-A") result.sort((a, b) => b.name.localeCompare(a.name));
-
-  if (voterState.timeSort === "Oldest" || voterState.timeSort === "Newest") {
-    const dir = voterState.timeSort === "Oldest" ? 1 : -1;
-    result.sort((a, b) => {
-      if (!a.time) return 1;
-      if (!b.time) return -1;
-      return dir * (new Date(a.time) - new Date(b.time));
-    });
-  }
-
-  return result;
-}
 
 /* =========================================================
    RENDER VOTERS
@@ -443,18 +486,11 @@ function renderVoters() {
   const empty = $("votersEmpty");
   if (!list || !empty) return;
 
-  const filtered = getFilteredVoters();
-  const totalPages = Math.max(1, Math.ceil(filtered.length / voterState.perPage));
-  if (voterState.page > totalPages) voterState.page = totalPages;
-
-  const start = (voterState.page - 1) * voterState.perPage;
-  const pageItems = filtered.slice(start, start + voterState.perPage);
-
   list.innerHTML = "";
-  empty.classList.toggle("show", !pageItems.length);
-  pageItems.forEach((voter) => list.appendChild(createVoterElement(voter)));
+  empty.classList.toggle("show", !voters.length);
+  voters.forEach((voter) => list.appendChild(createVoterElement(voter)));
 
-  updatePagination(totalPages);
+  updatePagination();   // CHANGED — no arg
 }
 
 const DETAIL_ROWS = [
@@ -531,39 +567,6 @@ function toggleVoter(article) {
 }
 
 /* =========================================================
-   SECTION FILTER OPTIONS
-========================================================= */
-
-function populateMultiSectionFilter() {
-  const container = $("multiSectionOptions");
-  if (!container) return;
-
-  const selectedSections = [...container.querySelectorAll('input[data-filter-type="section"]:checked')].map((i) => i.value);
-  const sections = [...new Set(voters.map((v) => v.section).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-
-  container.innerHTML = "";
-  sections.forEach((section) => {
-    const label = document.createElement("label");
-    label.className = "filter-check";
-
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = section;
-    input.dataset.filterType = "section";
-    input.checked = selectedSections.includes(section);
-
-    const span = document.createElement("span");
-    span.textContent = section;
-
-    label.append(input, span);
-    container.appendChild(label);
-  });
-
-  voterState.section = selectedSections.filter((s) => sections.includes(s));
-  updatePendingFilterCount();
-}
-
-/* =========================================================
    STATUS MODAL (generic info/success/error popup)
 ========================================================= */
 
@@ -637,10 +640,10 @@ function editVoter(uuid) {
 
   $("editVoterId").value = voter.id;
   $("editVoterName").value = voter.name;
-  $("editVoterProgram").value = voter.program;
+//  $("editVoterProgram").value = voter.program;
   $("editVoterYear").value = voter.year;
   $("editVoterSection").value = voter.section;
-  $("editVoterCampus").value = voter.campusId;
+//  $("editVoterCampus").value = voter.campusId;
   $("editVoterEmail").value = voter.email;
 
   $("editVoterModal")?.classList.add("show");
@@ -817,28 +820,14 @@ function deleteVoter(uuid) {
 }
 
 function deleteAllVoters() {
-  const activeVoters = getFilteredVoters();
-
-  if (!activeVoters.length) {
-    showSuccessToast(
-      "Delete Failed",
-      "There are no active voters to delete."
-    );
-    return;
-  }
-
   voterState.pendingDeleteId = null;
   voterState.pendingDeleteAll = true;
 
   if ($("deleteVoterMessage")) {
     $("deleteVoterMessage").textContent =
-      `Are you sure you want to permanently delete all ${activeVoters.length} active voters? This action cannot be undone.`;
+      `Are you sure you want to permanently delete all voters matching the current filters? This action cannot be undone.`;
   }
-
-  if ($("deleteVoterTitle")) {
-    $("deleteVoterTitle").textContent = "Delete All Voters?";
-  }
-
+  if ($("deleteVoterTitle")) $("deleteVoterTitle").textContent = "Delete All Voters?";
   $("deleteVoterModal")?.classList.add("show");
 }
 
@@ -893,57 +882,32 @@ async function performDeleteVoter(id) {
 }
 
 async function performDeleteAllVoters() {
-  const votersToDelete = getFilteredVoters();
-
-  const ids = votersToDelete.map(voter => voter.uuid);
-
-  if (!ids.length) {
-    closeDeleteModal();
-    window.hideActionLoading();
-    return;
-  }
+  const filter = {
+    yearLevel: voterState.year[0] || null,
+    section: voterState.section[0] || null,
+    search: voterState.search || null,
+  };
 
   try {
-    const response = await fetch(`${VOTER_API}/bulk`, {
+    const response = await fetch(`${VOTER_API}/delete-matching`, {
       method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify(ids)
+      body: JSON.stringify(filter),
     });
 
     const result = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(
-        result.message || "Failed to delete voters."
-      );
-    }
-
-    const count = result.count ?? ids.length;
+    if (!response.ok) throw new Error(result.message || "Failed to delete voters.");
 
     closeDeleteModal();
-
+    voterState.page = 1;
     await loadVoters();
 
-    showSuccessToast(
-      "Voters Moved to Trash",
-      `${count} voter(s) were moved to trash successfully.`
-    );
-
+    showSuccessToast("Voters Moved to Trash", `${result.count ?? 0} voter(s) were moved to trash successfully.`);
   } catch (error) {
     console.error("Delete all voters failed:", error);
-
     closeDeleteModal();
-
-    showVotersStatusModal(
-      "error",
-      "Delete Failed",
-      error.message || "Unable to delete voters."
-    );
-
+    showVotersStatusModal("error", "Delete Failed", error.message || "Unable to delete voters.");
   } finally {
     window.hideActionLoading();
   }
@@ -1007,16 +971,11 @@ function archiveVoter(uuid) {
 }
 
 function archiveAllVoters() {
-  const activeVoters = getFilteredVoters();
-  if (!activeVoters.length) {
-    showSuccessToast("Archive Failed", "There are no active voters to archive.");
-    return;
-  }
-
   voterState.pendingArchiveId = null;
   voterState.pendingArchiveAll = true;
+
   if ($("archiveVoterMessage")) {
-    $("archiveVoterMessage").textContent = `Are you sure you want to archive all ${activeVoters.length} active voters?`;
+    $("archiveVoterMessage").textContent = `Are you sure you want to archive all voters matching the current filters?`;
   }
   if ($("archiveVoterTitle")) $("archiveVoterTitle").textContent = "Archive All Voters?";
   $("archiveVoterModal")?.classList.add("show");
@@ -1076,57 +1035,32 @@ async function performArchiveVoter(id) {
 }
 
 async function performArchiveAllVoters() {
-  const votersToArchive = getFilteredVoters();
-
-  const ids = votersToArchive.map(voter => voter.uuid);
-
-  if (!ids.length) {
-    closeArchiveModal();
-    window.hideActionLoading();
-    return;
-  }
+  const filter = {
+    yearLevel: voterState.year[0] || null,
+    section: voterState.section[0] || null,
+    search: voterState.search || null,
+  };
 
   try {
-    const response = await fetch(`${VOTER_API}/archive`, {
+    const response = await fetch(`${VOTER_API}/archive-matching`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify(ids)
+      body: JSON.stringify(filter),
     });
 
     const result = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(
-        result.message || "Failed to archive voters."
-      );
-    }
-
-    const count = result.count ?? ids.length;
+    if (!response.ok) throw new Error(result.message || "Failed to archive voters.");
 
     closeArchiveModal();
-
+    voterState.page = 1;
     await loadVoters();
 
-    showSuccessToast(
-      "Voters Archived",
-      `${count} voter(s) were archived successfully.`
-    );
-
+    showSuccessToast("Voters Archived", `${result.count ?? 0} voter(s) were archived successfully.`);
   } catch (error) {
     console.error("Archive all voters failed:", error);
-
     closeArchiveModal();
-
-    showVotersStatusModal(
-      "error",
-      "Archive Failed",
-      error.message || "Unable to archive voters."
-    );
-
+    showVotersStatusModal("error", "Archive Failed", error.message || "Unable to archive voters.");
   } finally {
     window.hideActionLoading();
   }
@@ -1214,33 +1148,12 @@ function initializeActionLoadingModal() {
 
 function initializeExport() {
   $("exportVoters")?.addEventListener("click", () => {
-    const data = getFilteredVoters();
-    if (!data.length) {
-      showVotersStatusModal("error", "Export Failed", "There are no voters to export.");
-      return;
-    }
+    const params = new URLSearchParams();
+    if (voterState.year[0]) params.set("yearLevel", voterState.year[0]);
+    if (voterState.section[0]) params.set("section", voterState.section[0]);
+    if (voterState.search) params.set("search", voterState.search);
 
-        const headers = ["Student ID", "Full Name", "Course", "Year Level", "Section", "Campus", "Email", "Voting Status", "Time Voted"];
-        const rows = data.map((v) => [
-          v.id, v.name, v.program, v.year, v.section || "", v.campus || "", v.email || "",
-          v.departmentStatus, v.departmentTime ? formatDateTime(v.departmentTime) : "",
-        ]);
-
-    const csv = [headers, ...rows]
-      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "lccast-voters.csv";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-
-    showSuccessToast("Export Successful", `${data.length} voter(s) exported successfully.`);
+    window.location.href = `${VOTER_API}/export?${params.toString()}`;
   });
 }
 
@@ -1380,32 +1293,25 @@ function normalizeImportedVoter(row) {
     return key ? String(row[key] ?? "").trim() : "";
   };
 
-    const studentId = get("Student ID");
-    const fullName = get("Full Name");
-    const email = get("Email");
-    const yearLevel = get("Year Level") || get("Year");
-    const section = get("Section");
+  const studentId = get("Student ID");
+  const fullName = get("Full Name");
+  const email = get("Email");
+  const yearLevel = get("Year Level") || get("Year");
+  const section = get("Section");
+  const programCourse = get("Course") || get("Program"); // optional — must match your department if present
+  const campus = get("Campus"); // optional — must match your campus if present
 
-    if (!studentId || !fullName) return null;
+  if (!studentId || !fullName) return null;
 
-    const parts = fullName.split(/\s+/);
+  const parts = fullName.split(/\s+/);
+  const firstName = parts[0] || "";
+  const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
+  const middleName = parts.length > 2 ? parts.slice(1, -1).join(" ") : "";
 
-    const firstName = parts[0] || "";
-    const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
-    const middleName = parts.length > 2
-      ? parts.slice(1, -1).join(" ")
-      : "";
+  if (!firstName || !lastName) return null;
 
-    if (!firstName || !lastName) return null;
-
-    return {
-      studentId,
-      lastName,
-      firstName,
-      middleName,
-      fullName,
-      email,
-      yearLevel,
-      section
-    };
-  }
+  return {
+    studentId, lastName, firstName, middleName, fullName,
+    email, yearLevel, section, programCourse, campus
+  };
+}

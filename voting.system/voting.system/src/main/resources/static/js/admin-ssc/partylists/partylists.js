@@ -5,11 +5,30 @@
 ========================================================= */
 
 const PARTYLIST_API = "/admin-ssc/api/partylists";
+const ADMIN_CAMPUS_ID = document.body.dataset.adminCampusId || "";
 
 function getProtectedFileUrl(storagePath) {
     if (!storagePath) return "";
 
     return `${PARTYLIST_API}/file?path=${encodeURIComponent(storagePath)}`;
+}
+
+// School year starts in June (month index 5). Keep this the same as the elections page.
+const SCHOOL_YEAR_START_MONTH = 5;
+
+function getCurrentSchoolYear(date = new Date()) {
+    const year = date.getFullYear();
+    const startYear = date.getMonth() >= SCHOOL_YEAR_START_MONTH ? year : year - 1;
+    return `${startYear}-${startYear + 1}`;
+}
+
+function initializeDefaultSchoolYear() {
+    const input = document.getElementById("partylistsSchoolYear");
+    if (!input) return;
+
+    const schoolYear = getCurrentSchoolYear();
+    input.defaultValue = schoolYear; // form.reset() restores this
+    input.value = schoolYear;        // still editable
 }
 
 function showActionLoading(title, message) {
@@ -57,8 +76,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     initializeCampusFilter();
     initializeSuccessToast();
     initializeValidationBindings();
+    initializeDefaultSchoolYear();
 
     await loadExistingPartylists();
+    connectPartylistsSocket();
 });
 
 const DEFAULT_POSITIONS = [
@@ -66,13 +87,24 @@ const DEFAULT_POSITIONS = [
     "Auditor", "PRO Internal", "PRO External"
 ];
 
+function sortMembersByPosition(members) {
+    return [...members].sort((a, b) => {
+        const posA = DEFAULT_POSITIONS.indexOf(a.position);
+        const posB = DEFAULT_POSITIONS.indexOf(b.position);
+        // Unknown/custom positions (e.g. "Member", "Others" text) fall after the known ones, keeping their relative order
+        const rankA = posA === -1 ? DEFAULT_POSITIONS.length : posA;
+        const rankB = posB === -1 ? DEFAULT_POSITIONS.length : posB;
+        return rankA - rankB;
+    });
+}
+
 let pendingDeleteCard = null;
 let pendingArchiveCard = null;
 let pendingSaveAction = null;
 let successToastTimeout = null;
 let discardToastTimeout = null;
 
-async function loadExistingPartylists() {
+async function loadExistingPartylists(force = false) {
 
     const list = document.querySelector("#existingPartylists .partylists-list");
 
@@ -80,18 +112,16 @@ async function loadExistingPartylists() {
 
     try {
 
-        const response = await fetch(`${PARTYLIST_API}`, {
-            method: "GET",
-            headers: {
-                "Accept": "application/json"
+        const partylists = await SoftCache.load(PARTYLIST_API, {
+            force,
+            onRevalidated: () => {
+                // Don't rebuild the DOM while the admin is editing or has a card open
+                if (document.querySelector(
+                    "#existingPartylists .partylists-item.editing, #existingPartylists .partylists-item.show"
+                )) return;
+                loadExistingPartylists();
             }
         });
-
-        if (!response.ok) {
-            throw new Error(`Failed to load partylists: ${response.status}`);
-        }
-
-        const partylists = await response.json();
 
         list.innerHTML = "";
 
@@ -276,7 +306,7 @@ async function loadExistingPartylists() {
             initializePartylistsFileUploads(card);
             bindEditForm(card);
 
-            await loadPartylistMembers(card, partylist.id);
+             await loadPartylistMembers(card, partylist.id, force);
         }
 
         refreshExisting();
@@ -293,7 +323,32 @@ async function loadExistingPartylists() {
     }
 }
 
-async function loadPartylistMembers(card, partylistId) {
+/* ==========================================================
+   REAL-TIME UPDATES
+========================================================== */
+
+function connectPartylistsSocket() {
+  if (typeof StompJs === "undefined" || typeof SockJS === "undefined") {
+    console.error("StompJs/SockJS not loaded — real-time partylist updates disabled.");
+    return;
+  }
+
+  const topic = ADMIN_CAMPUS_ID
+    ? `/topic/partylists/campus/${ADMIN_CAMPUS_ID}`
+    : "/topic/partylists";
+
+  const client = new StompJs.Client({
+    webSocketFactory: () => new SockJS("/ws-analytics"),
+    reconnectDelay: 4000,
+    onConnect: () => {
+         client.subscribe(topic, () => loadExistingPartylists(true));
+    },
+  });
+
+  client.activate();
+}
+
+async function loadPartylistMembers(card, partylistId, force = false) {
 
     const memberList = card.querySelector(".existing-member-list");
 
@@ -301,25 +356,22 @@ async function loadPartylistMembers(card, partylistId) {
 
     try {
 
-        const response = await fetch(
+        const rawMembers = await SoftCache.load(
             `${PARTYLIST_API}/${partylistId}/members`,
             {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json"
+                force,
+                onRevalidated: () => {
+                    if (card.isConnected && !card.classList.contains("editing")) {
+                        loadPartylistMembers(card, partylistId);
+                    }
                 }
             }
         );
+       const members = Array.isArray(rawMembers) ? sortMembersByPosition(rawMembers) : rawMembers;
 
-        if (!response.ok) {
-            throw new Error("Failed to load partylist members.");
-        }
+       memberList.innerHTML = "";
 
-        const members = await response.json();
-
-        memberList.innerHTML = "";
-
-        if (!Array.isArray(members) || members.length === 0) {
+       if (!Array.isArray(members) || members.length === 0) {
 
             memberList.innerHTML = `
                 <div class="existing-member empty-member">
@@ -501,7 +553,7 @@ function showExistingMemberFile(memberElement, type) {
             message = "No background/COC uploaded.";
         }
 
-        alert(message);
+        showFileErrorToast(message);
         return;
     }
 
@@ -603,6 +655,7 @@ function showExistingMemberFile(memberElement, type) {
     `;
 
     document.body.appendChild(preview);
+    applyDocumentPreviewRatio(preview, type);
 
     const clickedButton =
         type === "campaign"
@@ -1808,8 +1861,10 @@ function showMemberFilePreview(row, type) {
             deleteMemberFile(row, type);
         });
 
+    applyDocumentPreviewRatio(preview, type);
+
     requestAnimationFrame(() => {
-        positionMemberFilePreview(row, preview);
+        positionMemberFilePreview(row, preview, type);
     });
 }
 
@@ -3425,7 +3480,7 @@ async function restorePartylist(id) {
             "Partylist restored successfully."
         );
 
-        await loadPartylists();
+        await loadExistingPartylists();
 
     } catch (error) {
         console.error(error);
@@ -3440,23 +3495,51 @@ async function restorePartylist(id) {
     }
 }
 
-async function loadArchivedPartylists() {
-    const response = await fetch(`${PARTYLIST_API}/archived`);
-
-    if (!response.ok) {
-        throw new Error("Failed to load archived partylists.");
-    }
-
-    return await response.json();
+async function loadArchivedPartylists(force = false) {
+    return SoftCache.load(`${PARTYLIST_API}/archived`, { force });
 }
 
-async function loadTrashPartylists() {
-    const response = await fetch(`${PARTYLIST_API}/trash`);
-
-    if (!response.ok) {
-        throw new Error("Failed to load deleted partylists.");
-    }
-
-    return await response.json();
+async function loadTrashPartylists(force = false) {
+    return SoftCache.load(`${PARTYLIST_API}/trash`, { force });
 }
 
+function showFileErrorToast(message) {
+    let toast = document.getElementById("fileErrorToast");
+
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "fileErrorToast";
+        toast.className = "success-toast error";
+
+        toast.innerHTML = `
+            <div class="success-toast-icon">
+                <i class="bi bi-exclamation-circle-fill"></i>
+            </div>
+
+            <div class="success-toast-content">
+                <strong>No File Uploaded</strong>
+                <span id="fileErrorToastMessage"></span>
+            </div>
+
+            <button
+                type="button"
+                class="success-toast-close"
+                id="fileErrorToastClose"
+                aria-label="Close notification">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        `;
+
+        document.body.appendChild(toast);
+
+        toast.querySelector("#fileErrorToastClose")
+            ?.addEventListener("click", () => toast.classList.remove("show"));
+    }
+
+    toast.querySelector("#fileErrorToastMessage").textContent = message;
+
+    requestAnimationFrame(() => toast.classList.add("show"));
+
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => toast.classList.remove("show"), 4000);
+}

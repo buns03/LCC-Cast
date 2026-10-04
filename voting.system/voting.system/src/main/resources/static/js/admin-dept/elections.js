@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initializeConfirmModals();
   initializeSuccessToast();
   initializeActionLoadingModal();
+  initializeDefaultSchoolYear();
 
   await loadExistingElectionsFromApi();
 
@@ -20,6 +21,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     initializeDiscardElection();
 
   initializeElectionEmailModal();
+  connectElectionsSocket();
 });
 
 /* ==========================================================
@@ -32,6 +34,37 @@ const ADMIN_CAMPUS_ID = document.body.dataset.adminCampusId || "";
 const ADMIN_DEPARTMENT_CODE = (document.body.dataset.adminDepartmentCode || "")
   .trim()
   .toUpperCase();
+
+  /* ==========================================================
+     REAL-TIME UPDATES
+  ========================================================== */
+
+  function connectElectionsSocket() {
+      if (typeof SockJS === "undefined") {
+          console.error("SockJS not loaded — real-time election updates disabled.");
+          return;
+      }
+
+      const topic = ADMIN_CAMPUS_ID
+          ? `/topic/elections/campus/${ADMIN_CAMPUS_ID}`
+          : "/topic/elections";
+
+      if (typeof StompJs !== "undefined") {
+          const client = new StompJs.Client({
+              webSocketFactory: () => new SockJS("/ws-analytics"),
+              reconnectDelay: 4000,
+          });
+          client.onConnect = () => client.subscribe(topic, () => loadExistingElectionsFromApi(false, true));
+          client.activate();
+      } else if (typeof Stomp !== "undefined") {
+          const socket = new SockJS("/ws-analytics");
+          const client = Stomp.over(socket);
+          client.debug = () => {};
+          client.connect({}, () => client.subscribe(topic, () => loadExistingElectionsFromApi(false, true)));
+      } else {
+          console.error("No STOMP client library found — real-time election updates disabled.");
+      }
+  }
 
 function extractProgramCode(title) {
   if (!title) return "";
@@ -122,7 +155,23 @@ function normalizeDepartmentType(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+// School year starts in June (month index 5). Keep this the same on every page.
+const SCHOOL_YEAR_START_MONTH = 5;
 
+function getCurrentSchoolYear(date = new Date()) {
+  const year = date.getFullYear();
+  const startYear = date.getMonth() >= SCHOOL_YEAR_START_MONTH ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+}
+
+function initializeDefaultSchoolYear() {
+  const input = $("electionSchoolYear");
+  if (!input) return;
+
+  const schoolYear = getCurrentSchoolYear();
+  input.defaultValue = schoolYear; // form.reset() restores this
+  input.value = schoolYear;        // still editable
+}
 
 /* ==========================================================
    ELECTION TABS (CREATE / EXISTING)
@@ -380,7 +429,7 @@ function initializeElectionCards() {
    LOAD ELECTIONS FROM BACKEND
 ========================================================== */
 
-async function loadExistingElectionsFromApi(showLoading = false) {
+async function loadExistingElectionsFromApi(showLoading = false, force = false) {
   const container = $("existingElections");
   if (!container) return;
 
@@ -392,18 +441,20 @@ async function loadExistingElectionsFromApi(showLoading = false) {
   }
 
   try {
-    const response = await fetch("/admin-dept/api/elections", {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
+    const elections = await SoftCache.load("/admin-dept/api/elections", {
+      force,
+      onRevalidated: (fresh) => {
+        // Don't rebuild cards while one is being edited or expanded
+        if (document.querySelector(
+          "#existingElections .election-item.editing, #existingElections .election-item.show"
+        )) return;
+        window.existingElections = fresh;
+        renderExistingElections(fresh);
+        initializeElectionCards();
+        initializeExistingElectionSearch();
+        initializeEditForms();
       },
     });
-
-    if (!response.ok) {
-      throw new Error(`Failed to load elections: ${response.status}`);
-    }
-
-    const elections = await response.json();
 
     console.log("Loaded elections:", elections);
 
@@ -436,7 +487,7 @@ if (!container) return;
 container.innerHTML = "";
 
 if (!elections || elections.length === 0) {
-container.innerHTML = `       <div class="election-empty">
+container.innerHTML = `       <div class="empty-state">
         No elections found.       </div>
     `;
 return;
@@ -1177,17 +1228,7 @@ async function initializeSelectionModal() {
 
     async function loadSelectionData() {
       try {
-        const departmentResponse = await fetch("/admin-dept/api/departments", {
-          headers: {
-            Accept: "application/json",
-          },
-        });
-
-        if (!departmentResponse.ok) {
-          throw new Error("Failed to load departments.");
-        }
-
-        departmentData = await departmentResponse.json();
+        departmentData = await SoftCache.load("/admin-dept/api/departments");
 
         const scopedDepartmentData = ADMIN_DEPARTMENT_CODE
           ? departmentData.filter((item) => {

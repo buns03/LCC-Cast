@@ -12,4 +12,6 @@ public interface ElectionPartylistRepository
     List<ElectionPartylist> findByElectionId(UUID electionId);
 
     void deleteByElectionId(UUID electionId);
+
+    List<ElectionPartylist> findByPartylistId(UUID partylistId);
 }

@@ -44,22 +44,10 @@ async function restoreDepartment(id) {
     }
 }
 
-async function loadArchivedDepartments() {
-    const response = await fetch(`${DEPARTMENT_API}/archived`);
-
-    if (!response.ok) {
-        throw new Error("Failed to load archived departments.");
-    }
-
-    return await response.json();
+async function loadArchivedDepartments(force = false) {
+    return SoftCache.load(`${DEPARTMENT_API}/archived`, { force });
 }
 
-async function loadTrashDepartments() {
-    const response = await fetch(`${DEPARTMENT_API}/trash`);
-
-    if (!response.ok) {
-        throw new Error("Failed to load deleted departments.");
-    }
-
-    return await response.json();
+async function loadTrashDepartments(force = false) {
+    return SoftCache.load(`${DEPARTMENT_API}/trash`, { force });
 }

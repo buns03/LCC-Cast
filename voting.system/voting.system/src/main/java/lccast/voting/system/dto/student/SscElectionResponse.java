@@ -17,6 +17,7 @@ public class SscElectionResponse {
     private ElectionPhase phase;
     private boolean hasVoted;
     private List<PositionResponse> positions;
+    private List<PartylistCandidatesResponse> partylists;
 
     public boolean isFound() { return found; }
     public void setFound(boolean found) { this.found = found; }
@@ -44,4 +45,7 @@ public class SscElectionResponse {
 
     public List<PositionResponse> getPositions() { return positions; }
     public void setPositions(List<PositionResponse> positions) { this.positions = positions; }
+
+    public List<PartylistCandidatesResponse> getPartylists() { return partylists; }
+    public void setPartylists(List<PartylistCandidatesResponse> partylists) { this.partylists = partylists; }
 }

@@ -12,6 +12,10 @@
 
     <title>LCC Cast | Live Results</title>
 
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
+
     <!-- Bootstrap Icons -->
     <link
             rel="stylesheet"
@@ -57,7 +61,7 @@ MOBILE NAVIGATION OVERLAY
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
         <div class="logo">
-            <img src="/images/lcccast_logo.png" alt="LCCast" />
+            <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
             <h2 >LCC Cast</h2>
         </div>
@@ -173,28 +177,6 @@ MOBILE NAVIGATION OVERLAY
            LIVE RESULT NAVIGATION
       ====================================================== -->
 
-    <div class="live-results-tabs">
-        <button
-                type="button"
-                class="live-results-tab active"
-                data-section="ssc"
-        >
-            <i class="bi bi-bank"></i>
-
-            SSC Voting
-        </button>
-
-        <button
-                type="button"
-                class="live-results-tab"
-                data-section="department"
-        >
-            <i class="bi bi-building"></i>
-
-            Department Voting
-        </button>
-    </div>
-
     <!-- =====================================================
            SSC VOTING
       ====================================================== -->
@@ -229,124 +211,7 @@ MOBILE NAVIGATION OVERLAY
                 class="campus-results-container"
         ></div>
     </section>
-
-    <!-- =====================================================
-           DEPARTMENT VOTING
-      ====================================================== -->
-
-    <section id="departmentLiveSection" class="live-section">
-        <div class="live-section-header">
-            <div>
-                <div class="live-title-row">
-                    <span class="live-status-dot"></span>
-
-                    <span class="live-status-text"> LIVE </span>
-                </div>
-
-                <h2>Department Voting</h2>
-
-                <p>Live voting results by department</p>
-            </div>
-
-            <div class="live-meta">
-                <div class="live-vote-count">
-                    <span>Votes Cast</span>
-
-                    <strong id="departmentLiveVotes"> 0 </strong>
-                </div>
-
-                <div class="live-updated">
-                    <i class="bi bi-arrow-repeat"></i>
-
-                    <span id="lastUpdatedDepartment"> Updating... </span>
-                </div>
-            </div>
-        </div>
-
-        <!-- =================================================
-     DEPARTMENT CAMPUS FILTER
-================================================= -->
-
-        <div class="campus-filter-card department-campus-filter">
-            <div class="campus-filter-title">
-                <div class="filter-icon">
-                    <i class="bi bi-funnel"></i>
-                </div>
-
-                <div>
-                    <strong>Campus</strong>
-
-                    <span> Select a campus to view department results </span>
-                </div>
-            </div>
-
-            <div class="campus-filter-controls">
-                <label for="departmentCampusFilter"> Show </label>
-
-                <select id="departmentCampusFilter">
-                    <option value="ALL">All Campuses</option>
-
-                    <option value="college">College</option>
-
-                    <option value="muzon">Muzon</option>
-
-                </select>
-            </div>
-        </div>
-
-        <!-- =================================================
-                 DEPARTMENT FILTER
-            ================================================== -->
-
-        <div class="department-filter-card">
-            <div class="department-filter-title">
-                <div class="filter-icon">
-                    <i class="bi bi-funnel"></i>
-                </div>
-
-                <div>
-                    <strong>Department</strong>
-
-                    <span> Select a department to view live results </span>
-                </div>
-            </div>
-
-            <div class="department-filter-controls">
-                <label for="liveDepartmentFilter"> Show </label>
-
-                <select id="liveDepartmentFilter">
-                    <option value="ALL">All Departments</option>
-
-                    <option value="BSA">BSA — Accountancy</option>
-
-                    <option value="BSBA">BSBA — Business Administration</option>
-
-                    <option value="BAEL">BAEL — Communication Arts</option>
-
-                    <option value="BSCRIM">BSCRIM — Criminology</option>
-
-                    <option value="BSCE">BSCE — Engineering</option>
-
-                    <option value="BSHM">BSHM — Hospitality Management</option>
-
-                    <option value="BSIS">BSIS — Information Systems</option>
-
-                    <option value="BSPSY">BSPSY — Psychology</option>
-
-                    <option value="EDUC">EDUC — Teacher Education</option>
-                </select>
-            </div>
-        </div>
-
-        <!-- =================================================
-                 DEPARTMENT RESULTS
-            ================================================== -->
-
-        <div
-                id="departmentLiveContainer"
-                class="department-live-container"
-        ></div>
-    </section>
+    
 </main>
 
 <!-- =========================================================
@@ -362,7 +227,7 @@ MOBILE NAVIGATION OVERLAY
 
             <h2>Logout?</h2>
 
-            <p>Are you sure you want to logout from LCCast?</p>
+            <p>Are you sure you want to logout from LCC Cast?</p>
         </div>
 
         <div class="modal-footer">
@@ -403,7 +268,7 @@ MOBILE NAVIGATION OVERLAY
 <!-- =========================================================
      LIVE RESULTS JS
 ========================================================== -->
-
+<script src="/js/superadmin/soft-cache.js"></script>
 <script src="/js/navigation.js"></script>
 
 <script src="/js/logout.js"></script>

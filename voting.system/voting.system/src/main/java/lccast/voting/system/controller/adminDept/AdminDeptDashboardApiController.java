@@ -1,6 +1,7 @@
 package lccast.voting.system.controller.adminDept;
 
 import jakarta.servlet.http.HttpSession;
+import lccast.voting.system.service.superadmin.DashboardService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,22 +16,16 @@ import lccast.voting.system.service.adminDept.AdminDeptDashboardService;
 @RequestMapping("/admin-dept")
 public class AdminDeptDashboardApiController {
 
-    private final AdminDeptDashboardService adminDeptDashboardService;
+    private final DashboardService dashboardService;   // was AdminDeptDashboardService
 
-    public AdminDeptDashboardApiController(
-            AdminDeptDashboardService adminDeptDashboardService) {
-
-        this.adminDeptDashboardService = adminDeptDashboardService;
+    public AdminDeptDashboardApiController(DashboardService dashboardService) {
+        this.dashboardService = dashboardService;
     }
 
     @GetMapping("/api/dashboard")
     public ResponseEntity<AdminDeptDashboardResponse> getDashboard(HttpSession session) {
-
         UUID campusId = (UUID) session.getAttribute("campusId");
-        String departmentCode = (String) session.getAttribute("programCourse");
-
-        return ResponseEntity.ok(
-                adminDeptDashboardService.getDashboard(campusId, departmentCode)
-        );
+        String program = (String) session.getAttribute("programCourse");
+        return ResponseEntity.ok(dashboardService.getDashboardForAdminDept(campusId, program));
     }
 }

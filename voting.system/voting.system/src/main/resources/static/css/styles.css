@@ -70,6 +70,25 @@ body {
 }
 
 
+body::before {
+
+    content: "";
+
+    position: fixed;
+
+    inset: 0;
+
+    z-index: -1;
+
+    background:
+        linear-gradient(rgba(15, 23, 42, .25), rgba(15, 23, 42, .25)),
+        url("/images/lcc_bg.png") center center / cover no-repeat;
+
+    background-color: var(--background); /* fallback while loading */
+
+}
+
+
 /* =========================================================
    LOGIN PAGE
 ========================================================= */
@@ -77,6 +96,7 @@ body {
 .login-page {
 
     min-height: 100vh;
+    min-height: 100dvh;
 
     display: flex;
 
@@ -469,6 +489,69 @@ body.modal-open {
 
 }
 
+/* =========================================================
+   PASSWORD TOGGLE
+========================================================= */
+
+.password-field {
+    position: relative;
+    width: 100%;
+}
+
+.password-field input {
+    padding-right: 46px;
+}
+
+.password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: #94A3B8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: .2s ease;
+}
+
+.password-toggle:hover {
+    background: #F1F3F8;
+    color: var(--primary);
+}
+
+.password-toggle i {
+    font-size: 16px;
+}
+
+/* =========================================================
+   CONCURRENT LOGIN WARNING
+========================================================= */
+
+.inline-warning.concurrent-login-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #FFF6E5;
+    color: #B7791F;
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: 500;
+}
+
+.inline-warning.concurrent-login-warning i {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
 
 /* =========================================================
    MODAL OVERLAY
@@ -743,4 +826,44 @@ body.modal-open {
 
     }
 
+    .logo-text {
+        font-size: 26px;
+    }
+
+    .tagline {
+        font-size: 13px;
+        margin-bottom: 26px;
+    }
+
+    .forgot-modal h2 {
+        font-size: 20px;
+    }
+
+    .forgot-modal > .reset-step > p {
+        font-size: 13px;
+    }
+
+}
+
+@media (max-width: 400px) {
+
+    .login-container {
+        padding: 26px 18px;
+    }
+
+    .logo-text {
+        font-size: 23px;
+    }
+
+    .tagline {
+        font-size: 12.5px;
+    }
+
+    .forgot-modal {
+        padding: 26px 18px;
+    }
+
+    .forgot-modal h2 {
+        font-size: 18px;
+    }
 }

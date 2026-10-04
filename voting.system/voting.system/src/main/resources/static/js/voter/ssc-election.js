@@ -44,13 +44,14 @@ async function loadElectionData() {
   renderElectionSkeleton(electionContent);
 
   try {
-    const response = await fetch("/voter/api/elections/ssc");
+    const data = await SoftCache.load("/voter/api/elections/ssc", {
+      ttl: 10000,
+      swr: false,
+    });
 
-    if (!response.ok) {
-      throw new Error("Failed to load election data.");
+    if (Array.isArray(data.positions)) {
+      data.positions = sortByPositionOrder(data.positions);
     }
-
-    const data = await response.json();
 
     voterElectionState.data = data;
 
@@ -263,6 +264,8 @@ function renderUpcomingState(container, data) {
   container.innerHTML = `
     <div class="election-info-card"></div>
 
+    <div class="election-view-candidates-action" id="viewCandidatesButtonWrapper"></div>
+
     <div class="election-instructions">
       <h3>Voting Has Not Started</h3>
       <p>
@@ -281,6 +284,7 @@ function renderUpcomingState(container, data) {
   `;
 
   renderElectionInformation(data);
+  renderViewCandidatesButton();
 }
 
 /* =========================================================
@@ -290,6 +294,8 @@ function renderUpcomingState(container, data) {
 function renderOngoingState(container, data) {
   container.innerHTML = `
     <div class="election-info-card"></div>
+
+    <div class="election-view-candidates-action" id="viewCandidatesButtonWrapper"></div>
 
     <div class="election-instructions">
       <h3>Before You Vote</h3>
@@ -308,6 +314,11 @@ function renderOngoingState(container, data) {
     </div>
 
     <div class="election-action">
+      <button type="button" class="secondary-btn" id="clearAllVotes">
+        <i class="bi bi-arrow-counterclockwise"></i>
+        Clear All
+      </button>
+
       <button type="button" class="primary-btn" id="reviewVotes">
         <i class="bi bi-clipboard-check"></i>
         Review Vote
@@ -316,6 +327,7 @@ function renderOngoingState(container, data) {
   `;
 
   renderElectionInformation(data);
+  renderViewCandidatesButton();
 }
 
 /* =========================================================
@@ -371,6 +383,57 @@ function renderElectionInformation(data) {
       </div>
     </div>
   `;
+}
+
+/* =========================================================
+   VIEW CANDIDATES BUTTON (opens the shared partylist modal)
+========================================================= */
+
+function renderViewCandidatesButton() {
+  const wrapper = document.getElementById("viewCandidatesButtonWrapper");
+
+  if (!wrapper) return;
+
+  wrapper.innerHTML = `
+    <button type="button" class="view-candidates-btn" id="openViewCandidatesBtn">
+      <i class="bi bi-people-fill"></i>
+      View Candidates
+    </button>
+  `;
+
+  document
+    .getElementById("openViewCandidatesBtn")
+    ?.addEventListener("click", () => {
+      const data = voterElectionState.data;
+      const parties = mapSscPartylistsForModal(data ? data.partylists : []);
+      openViewCandidatesModal(parties);
+    });
+}
+
+/*
+ * Maps the backend's raw `partylists` array (storage paths) into the
+ * shape the shared view-candidates-modal.js expects (resolved URLs).
+ *
+ * Expects each partylist item to look like:
+ * {
+ *   id, name, posterImageUrl, logoImageUrl,
+ *   members: [{ position, name, photoImageUrl, campaignImageUrl, backgroundImageUrl }]
+ * }
+ */
+function mapSscPartylistsForModal(rawPartylists) {
+  return (rawPartylists || []).map((party) => ({
+    id: party.id,
+    name: party.name,
+    posterImageUrl: party.posterImageUrl ? getProtectedFileUrl(party.posterImageUrl) : "",
+    logoImageUrl: party.logoImageUrl ? getProtectedFileUrl(party.logoImageUrl) : "",
+    members: (party.members || []).map((member) => ({
+      position: member.position,
+      name: member.name,
+      photoImageUrl: member.photoImageUrl ? getProtectedFileUrl(member.photoImageUrl) : "",
+      campaignImageUrl: member.campaignImageUrl ? getProtectedFileUrl(member.campaignImageUrl) : "",
+      backgroundImageUrl: member.backgroundImageUrl ? getProtectedFileUrl(member.backgroundImageUrl) : "",
+    })),
+  }));
 }
 
 /* =========================================================
@@ -468,6 +531,16 @@ function createCandidateCard(candidate, positionName, votingEnabled) {
                 <i class="bi bi-check2-circle"></i>
                 <span>Select</span>
               </button>
+
+              <button
+                type="button"
+                class="candidate-clear-btn"
+                data-candidate-id="${escapeHtml(candidate.id)}"
+                data-position="${escapeHtml(positionName)}"
+                aria-label="Clear selection"
+              >
+                <i class="bi bi-x-lg"></i>
+              </button>
             `
             : ""
         }
@@ -484,15 +557,46 @@ function createCandidateCard(candidate, positionName, votingEnabled) {
 
 function initializeCandidateSelection() {
   document.addEventListener("click", (event) => {
-    const button = event.target.closest(".candidate-select-btn");
+    const selectButton = event.target.closest(".candidate-select-btn");
+
+    if (selectButton) {
+      const candidateId = selectButton.dataset.candidateId;
+      const position = selectButton.dataset.position;
+
+      if (candidateId && position) {
+        selectCandidate(position, candidateId);
+      }
+      return;
+    }
+
+    const clearButton = event.target.closest(".candidate-clear-btn");
+
+    if (clearButton) {
+      const position = clearButton.dataset.position;
+      if (position) clearPositionSelection(position);
+    }
+  });
+}
+
+function clearPositionSelection(position) {
+  delete voterElectionState.selections[position];
+
+  const positionSection = [...document.querySelectorAll(".election-position")]
+    .find((section) => section.dataset.position === position);
+
+  if (!positionSection) return;
+
+  positionSection.querySelectorAll(".candidate-card").forEach((card) => {
+    card.classList.remove("selected", "dimmed");
+
+    const button = card.querySelector(".candidate-select-btn");
     if (!button) return;
 
-    const candidateId = button.dataset.candidateId;
-    const position = button.dataset.position;
+    const label = button.querySelector("span");
+    const icon = button.querySelector("i");
 
-    if (!candidateId || !position) return;
-
-    selectCandidate(position, candidateId);
+    if (label) label.textContent = "Select";
+    if (icon) icon.className = "bi bi-check2-circle";
   });
 }
 
@@ -630,7 +734,15 @@ function openCampaignModal(candidate) {
     document
       .getElementById("campaignCloseButton")
       ?.addEventListener("click", closeCampaignModal);
+
+      const campaignImg = modal.querySelector("#campaignImage");
+            window.applyDocImageRatio?.(
+              campaignImg?.closest(".campaign-image-wrapper"),
+              campaignImg,
+            );
   }
+
+
 
   const loadingContent = modal.querySelector(".campaign-loading-content");
   const loadedContent = modal.querySelector(".campaign-loaded-content");
@@ -724,13 +836,42 @@ function closeCampaignModal() {
 
 function initializeReviewVoting() {
   document.addEventListener("click", (event) => {
-    const button = event.target.closest("#reviewVotes");
+    const reviewButton = event.target.closest("#reviewVotes");
+
+    if (reviewButton) {
+      if (!validateVoteSelections()) return;
+      openReviewVoteModal();
+      return;
+    }
+
+    const clearAllButton = event.target.closest("#clearAllVotes");
+    if (clearAllButton) clearAllSelections();
+  });
+}
+
+function clearAllSelections() {
+  if (Object.keys(voterElectionState.selections).length === 0) return;
+
+  voterElectionState.selections = {};
+
+  document.querySelectorAll(".candidate-card").forEach((card) => {
+    card.classList.remove("selected", "dimmed");
+
+    const button = card.querySelector(".candidate-select-btn");
     if (!button) return;
 
-    if (!validateVoteSelections()) return;
+    const label = button.querySelector("span");
+    const icon = button.querySelector("i");
 
-    openReviewVoteModal();
+    if (label) label.textContent = "Select";
+    if (icon) icon.className = "bi bi-check2-circle";
   });
+
+  showVoteToast(
+    "warning",
+    "Selections Cleared",
+    "All your candidate selections have been cleared.",
+  );
 }
 
 function validateVoteSelections() {

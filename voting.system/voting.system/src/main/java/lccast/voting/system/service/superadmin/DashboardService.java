@@ -1,250 +1,114 @@
 package lccast.voting.system.service.superadmin;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import lccast.voting.system.dto.adminDept.AdminDeptDashboardResponse;
+import lccast.voting.system.dto.adminDept.AdminDeptDashboardStatistics;
+import lccast.voting.system.dto.adminDept.PositionVoteData;
 import lccast.voting.system.dto.superadmin.CampusVoteData;
 import lccast.voting.system.dto.superadmin.DashboardResponse;
 import lccast.voting.system.dto.superadmin.DashboardStatistics;
 import lccast.voting.system.dto.superadmin.ProgramVoteData;
-import lccast.voting.system.model.RecordStatus;
-import lccast.voting.system.model.VotingStatus;
 import lccast.voting.system.repository.superadmin.DashboardRepository;
 
 @Service
+@Transactional(readOnly = true)
 public class DashboardService {
 
-    private final DashboardRepository dashboardRepository;
+    private static final List<String> POSITION_ORDER = List.of(
+            "President", "Vice President", "Secretary", "Treasurer",
+            "Auditor", "PRO Internal", "PRO External");
 
-    public DashboardService(
-            DashboardRepository dashboardRepository) {
+    private final DashboardRepository repo;
 
-        this.dashboardRepository =
-                dashboardRepository;
+    public DashboardService(DashboardRepository repo) {
+        this.repo = repo;
     }
 
-
-    // =====================================================
-    // GET DASHBOARD
-    // =====================================================
-
+    // ---------- superadmin: campus name or "all" ----------
     public DashboardResponse getDashboard(String campus) {
-
-        UUID campusId =
-                resolveCampusId(campus);
-
-        long totalVoters;
-
-        long totalVoted;
-
-        long activeElection;
-
-        long totalCandidates;
-
-        List<ProgramVoteData> departmentVotes;
-
-
-        // =====================================================
-        // ALL CAMPUSES
-        // =====================================================
-
-        if (campusId == null) {
-
-            totalVoters =
-                    dashboardRepository.countAllActiveVoters(
-                            RecordStatus.ACTIVE
-                    );
-
-            totalVoted =
-                    dashboardRepository.countVoted(
-                            RecordStatus.ACTIVE,
-                            VotingStatus.VOTED
-                    );
-
-            activeElection =
-                    dashboardRepository.countActiveElections(
-                            RecordStatus.ACTIVE
-                    );
-
-            totalCandidates =
-                    dashboardRepository.countCandidates();
-
-            departmentVotes =
-                    dashboardRepository.getDepartmentVotes();
-        }
-
-
-        // =====================================================
-        // SINGLE CAMPUS
-        // =====================================================
-
-        else {
-
-            totalVoters =
-                    dashboardRepository.countActiveVotersByCampus(
-                            RecordStatus.ACTIVE,
-                            campusId
-                    );
-
-            totalVoted =
-                    dashboardRepository.countVotedByCampus(
-                            RecordStatus.ACTIVE,
-                            VotingStatus.VOTED,
-                            campusId
-                    );
-
-            activeElection =
-                    dashboardRepository.countActiveElectionsByCampus(
-                            RecordStatus.ACTIVE,
-                            campusId
-                    );
-
-            totalCandidates =
-                    dashboardRepository.countCandidatesByCampus(
-                            campusId
-                    );
-
-            departmentVotes =
-                    dashboardRepository.getDepartmentVotesByCampus(
-                            campusId
-                    );
-        }
-
-
-        // =====================================================
-        // STATISTICS
-        // =====================================================
-
-        DashboardStatistics statistics =
-                new DashboardStatistics(
-                        totalVoters,
-                        totalVoted,
-                        activeElection,
-                        totalCandidates
-                );
-
-
-        // =====================================================
-        // CAMPUS GRAPH
-        // =====================================================
-
-        List<CampusVoteData> campusVotes =
-                dashboardRepository.getVotesByCampus(
-                        RecordStatus.ACTIVE,
-                        VotingStatus.VOTED
-                );
-
-
-        // =====================================================
-        // SSC GRAPH
-        // =====================================================
-
-        List<ProgramVoteData> sscVotes =
-                List.of(
-
-                        new ProgramVoteData(
-                                "Voted",
-                                totalVoted
-                        ),
-
-                        new ProgramVoteData(
-                                "Not Voted",
-                                Math.max(
-                                        0,
-                                        totalVoters - totalVoted
-                                )
-                        )
-                );
-
-
-        // =====================================================
-        // RESPONSE
-        // =====================================================
-
-        return new DashboardResponse(
-                statistics,
-                campusVotes,
-                departmentVotes,
-                sscVotes
-        );
+        UUID campusId = resolveCampusId(campus);
+        return build(campusId, null, true);
     }
 
+    // ---------- admin-ssc: campus only ----------
+    public DashboardResponse getDashboardForAdminSsc(UUID campusId) {
+        if (campusId == null) {
+            throw new IllegalStateException("Missing campusId in session — admin-ssc not scoped.");
+        }
+        return build(campusId, null, false);
+    }
 
-    // =====================================================
-    // CAMPUS NAME → CAMPUS ID
-    // =====================================================
+    // ---------- admin-dept: campus + program ----------
+    public AdminDeptDashboardResponse getDashboardForAdminDept(UUID campusId, String program) {
+        if (campusId == null || program == null || program.isBlank()) {
+            throw new IllegalStateException(
+                    "Missing campusId/programCourse in session — admin-dept not scoped.");
+        }
+        String code = program.trim();
+
+        AdminDeptDashboardStatistics statistics = new AdminDeptDashboardStatistics(
+                repo.countVoters(campusId, code),
+                repo.countVoted(campusId, code),
+                repo.countActiveElections(campusId, code),
+                repo.countCandidates(campusId, code));
+
+        List<PositionVoteData> positions = repo.votesByPosition(campusId, code).stream()
+                .map(r -> new PositionVoteData((String) r[0], count(r[1])))
+                .sorted(Comparator.comparingInt(p -> positionRank(p.getPosition())))
+                .toList();
+
+        return new AdminDeptDashboardResponse(statistics, positions);
+    }
+
+    // ---------- shared builder ----------
+    private DashboardResponse build(UUID campusId, String program, boolean fullGraphs) {
+        long totalVoters = repo.countVoters(campusId, program);
+        long totalVoted = repo.countVoted(campusId, program);
+
+        DashboardStatistics statistics = new DashboardStatistics(
+                totalVoters,
+                totalVoted,
+                repo.countActiveElections(campusId, program),
+                repo.countCandidates(campusId, program));
+
+        List<ProgramVoteData> sscVotes = List.of(
+                new ProgramVoteData("Voted", totalVoted),
+                new ProgramVoteData("Not Voted", Math.max(0, totalVoters - totalVoted)));
+
+        if (!fullGraphs) {
+            return new DashboardResponse(statistics, List.of(), List.of(), sscVotes);
+        }
+
+        List<CampusVoteData> campusVotes = repo.votedByCampus().stream()
+                .map(r -> new CampusVoteData((String) r[0], count(r[1])))
+                .toList();
+
+        List<ProgramVoteData> departmentVotes = repo.votedByProgram(campusId).stream()
+                .map(r -> new ProgramVoteData((String) r[0], count(r[1])))
+                .toList();
+
+        return new DashboardResponse(statistics, campusVotes, departmentVotes, sscVotes);
+    }
 
     private UUID resolveCampusId(String campus) {
-
-        if (campus == null ||
-                campus.trim().isEmpty() ||
-                campus.equalsIgnoreCase("all")) {
-
+        if (campus == null || campus.isBlank() || campus.equalsIgnoreCase("all")) {
             return null;
         }
-
-        return dashboardRepository
-                .findCampusByNameIgnoreCase(campus.trim())
-                .map(c -> c.getId())
-                .orElse(null);
+        return repo.findCampusIdByName(campus.trim()).orElse(null);
     }
 
-    public DashboardResponse getDashboardForAdminSsc(UUID campusId) {
+    private static int positionRank(String position) {
+        int i = POSITION_ORDER.indexOf(position);
+        return i < 0 ? Integer.MAX_VALUE : i;
+    }
 
-        long totalVoters =
-                dashboardRepository.countActiveVotersByCampus(
-                        RecordStatus.ACTIVE,
-                        campusId
-                );
-
-        long totalVoted =
-                dashboardRepository.countVotedByCampus(
-                        RecordStatus.ACTIVE,
-                        VotingStatus.VOTED,
-                        campusId
-                );
-
-        long activeElection =
-                dashboardRepository.countActiveElectionsByCampus(
-                        RecordStatus.ACTIVE,
-                        campusId
-                );
-
-        long totalCandidates =
-                dashboardRepository.countCandidatesByCampus(
-                        campusId
-                );
-
-        DashboardStatistics statistics =
-                new DashboardStatistics(
-                        totalVoters,
-                        totalVoted,
-                        activeElection,
-                        totalCandidates
-                );
-
-        List<ProgramVoteData> sscVotes =
-                List.of(
-                        new ProgramVoteData(
-                                "Voted",
-                                totalVoted
-                        ),
-                        new ProgramVoteData(
-                                "Not Voted",
-                                Math.max(
-                                        0,
-                                        totalVoters - totalVoted
-                                )
-                        )
-                );
-
-        return new DashboardResponse(
-                statistics,
-                List.of(),   // campusVotes — not used by admin-ssc
-                List.of(),   // departmentVotes — not used by admin-ssc
-                sscVotes
-        );
+    private static long count(Object value) {
+        return value == null ? 0L : ((Number) value).longValue();
     }
 }

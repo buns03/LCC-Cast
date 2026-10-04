@@ -3,6 +3,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initializeConfirmModals();
   initializeSuccessToast();
   initializeActionLoadingModal();
+  initializeDefaultSchoolYear();
 
   await loadExistingElectionsFromApi();
 
@@ -14,6 +15,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initializeDiscardElection();
 
   initializeElectionEmailModal();
+  connectElectionsSocket();
 });
 
 const ELECTION_API = "/admin-ssc/api/elections";
@@ -22,6 +24,23 @@ const PARTYLIST_API = "/admin-ssc/api/partylists";
 const $ = (id) => document.getElementById(id);
 const ADMIN_CAMPUS_ID = document.body.dataset.adminCampusId || "";
 const ADMIN_CAMPUS_NAME = document.body.dataset.adminCampusName || "";
+
+// School year starts in June (month index 5). Change this if your cutoff differs.
+const SCHOOL_YEAR_START_MONTH = 5;
+
+function getCurrentSchoolYear(date = new Date()) {
+  const year = date.getFullYear();
+  const startYear = date.getMonth() >= SCHOOL_YEAR_START_MONTH ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+}
+
+function initializeDefaultSchoolYear() {
+  const input = $("electionSchoolYear");
+  if (!input) return;
+  const sy = getCurrentSchoolYear();
+  input.defaultValue = sy; // form.reset() will restore this
+  input.value = sy;        // still editable by the admin
+}
 
 function showFieldError(field, message) {
   const formGroup = field?.closest(".form-group");
@@ -84,6 +103,31 @@ function toDateTimeLocalValue(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/* ==========================================================
+   REAL-TIME UPDATES
+========================================================== */
+
+function connectElectionsSocket() {
+  if (typeof StompJs === "undefined" || typeof SockJS === "undefined") {
+    console.error("StompJs/SockJS not loaded — real-time election updates disabled.");
+    return;
+  }
+
+  const topic = ADMIN_CAMPUS_ID
+    ? `/topic/elections/campus/${ADMIN_CAMPUS_ID}`
+    : "/topic/elections";
+
+  const client = new StompJs.Client({
+    webSocketFactory: () => new SockJS("/ws-analytics"),
+    reconnectDelay: 4000,
+    onConnect: () => {
+      client.subscribe(topic, () => loadExistingElectionsFromApi(false, true));
+    },
+  });
+
+  client.activate();
+}
+
 function formatScheduledEmailDate(value) {
   const date = new Date(value);
   if (isNaN(date)) return "—";
@@ -119,7 +163,7 @@ function initializeElectionTabs() {
 
 /* ============ LOAD / RENDER ============ */
 
-async function loadExistingElectionsFromApi(showLoading = false) {
+async function loadExistingElectionsFromApi(showLoading = false, force = false) {
   const container = $("existingElections");
   if (!container) return;
 
@@ -128,10 +172,19 @@ async function loadExistingElectionsFromApi(showLoading = false) {
   }
 
   try {
-    const response = await fetch(ELECTION_API, { method: "GET", headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error(`Failed to load elections: ${response.status}`);
-
-    const elections = await response.json();
+     const elections = await SoftCache.load(ELECTION_API, {
+      force,
+      onRevalidated: (fresh) => {
+        // Don't rebuild cards while one is being edited or expanded
+        if (document.querySelector(
+          "#existingElections .election-item.editing, #existingElections .election-item.show"
+        )) return;
+        renderExistingElections(fresh);
+        initializeElectionCards();
+        initializeExistingElectionSearch();
+        initializeEditForms();
+      },
+    });
     renderExistingElections(elections);
 
     initializeElectionCards();
@@ -151,7 +204,7 @@ function renderExistingElections(elections) {
   container.innerHTML = "";
 
   if (!elections || elections.length === 0) {
-    container.innerHTML = `<div class="election-empty">No elections found.</div>`;
+    container.innerHTML = `<div class="empty-state">No elections found.</div>`;
     return;
   }
 
@@ -590,9 +643,7 @@ async function initializeSelectionModal() {
 
   async function loadSelectionData() {
     try {
-      const response = await fetch(PARTYLIST_API, { headers: { Accept: "application/json" } });
-      if (!response.ok) throw new Error("Failed to load partylists.");
-      const data = await response.json();
+      const data = await SoftCache.load(PARTYLIST_API);
 
       partylistData = data.map((item) => ({
         id: item.id,

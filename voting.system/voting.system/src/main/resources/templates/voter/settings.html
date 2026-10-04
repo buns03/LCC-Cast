@@ -11,7 +11,11 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
 
-  <title>Settings | LCCast</title>
+  <title>LCC Cast | Settings</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+  <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
 
   <!-- SHARED CSS -->
   <link rel="stylesheet" href="/css/base.css" />
@@ -20,6 +24,7 @@
   <link rel="stylesheet" href="/css/forms.css" />
   <link rel="stylesheet" href="/css/modal.css" />
   <link rel="stylesheet" href="/css/navigation.css" />
+  <link rel="stylesheet" href="/css/password-rules.css" />
 
   <!-- PAGE CSS -->
   <link rel="stylesheet" href="/css/voter/voter-settings.css" />
@@ -57,7 +62,7 @@
     <!-- LOGO -->
 
     <div class="logo">
-      <img src="/images/lcccast_logo.png" alt="LCCast" />
+      <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
       <h2 >LCC Cast</h2>
     </div>
@@ -67,6 +72,21 @@
     <!-- NAVIGATION -->
 
     <nav>
+
+      <th:block th:if="${role == 'CANDIDATE'}">
+        <a href="/candidate/personal-information">
+          <i class="bi bi-person-vcard"></i>
+          <span>Personal Information</span>
+        </a>
+
+        <a href="/candidate/partylist-information">
+          <i class="bi bi-people"></i>
+          <span>Partylist Information</span>
+        </a>
+
+        <hr />
+      </th:block>
+
       <a href="/voter/ssc-election">
         <i class="bi bi-calendar-event"></i>
 
@@ -125,7 +145,10 @@
     <!-- PROFILE -->
 
     <div class="profile">
-      <div class="avatar"></div>
+      <div class="avatar">
+        <img th:if="${avatarUrl}" th:src="${avatarUrl}" alt="Avatar"
+             style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />
+      </div>
 
       <div class="profile-info">
         <span th:text="${displayName}"> Username </span>
@@ -329,6 +352,8 @@
                     </button>
                   </div>
 
+                  <small id="newPasswordStrength" class="password-strength-message"></small>
+
                   <small class="field-error">
                     Please enter a new password.
                   </small>
@@ -412,7 +437,7 @@
 
       <h2>Logout?</h2>
 
-      <p>Are you sure you want to logout from LCCast?</p>
+      <p>Are you sure you want to logout from LCC Cast?</p>
     </div>
 
     <div class="modal-footer">
@@ -522,9 +547,10 @@
 <!-- =========================================================
      JAVASCRIPT
 ========================================================== -->
-
+<script src="/js/superadmin/soft-cache.js"></script>
 <script src="/js/navigation.js"></script>
 <script src="/js/logout.js"></script>
+<script src="/js/password-rules.js"></script>
 <script src="/js/voter/voter-settings.js"></script>
 </body>
 </html>

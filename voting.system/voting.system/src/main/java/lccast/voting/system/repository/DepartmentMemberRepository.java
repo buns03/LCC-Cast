@@ -50,4 +50,6 @@ public interface DepartmentMemberRepository
 
     boolean existsByStudentId(String studentId);
 
+    boolean existsByStudentIdAndDepartmentStatus(String studentId, RecordStatus status);
+
 }

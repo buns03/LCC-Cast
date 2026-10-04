@@ -1583,4 +1583,31 @@
 
     }
 
+    .voter-summary {
+            flex-wrap: wrap;
+            row-gap: 10px;
+            min-height: auto;
+            padding: 12px 16px;
+        }
+
+        .voter-summary-main {
+            flex: 1 1 100%;
+            width: 100%;
+        }
+
+        .voter-summary-status {
+            margin-left: 0;
+            flex: 1 1 auto;
+        }
+
+       .voter-summary-actions {
+               width: 100%;
+               justify-content: center;
+               margin-left: 0;
+           }
+
+        .voter-action-btn {
+            flex-shrink: 0;
+        }
+
 }

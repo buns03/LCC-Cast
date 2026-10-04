@@ -17,11 +17,15 @@ document.addEventListener("DOMContentLoaded", () => {
 let departmentElectionData = null;
 
 async function fetchDepartmentElectionData() {
-  const response = await fetch("/voter/api/department-elections/current");
-
-  const data = await response.json().catch(() => ({}));
-
-  return data;
+    try {
+      return await SoftCache.load("/voter/api/department-elections/current", {
+        ttl: 10000,
+        swr: false,
+      });
+    } catch (error) {
+      console.error("Failed to load department election:", error);
+      return {};
+    }
 }
 
 function mapPositionsToObjects(positionNames) {
@@ -77,6 +81,12 @@ function mapCandidatesToMembers(candidates) {
     campaignImage:
       resolveElectionFileUrl(candidate.campaignImageUrl) ||
       "/images/campaign-placeholder.png",
+    // Used by the "View Candidates" modal (View Background button).
+    backgroundImage: resolveElectionFileUrl(candidate.backgroundImageUrl) || "",
+    // Representative candidates don't always carry a fixed position in
+    // this data model (a member can be picked for any open position),
+    // but if the backend does send one, keep it for the modal grouping.
+    position: candidate.position || "",
   }));
 
 
@@ -202,10 +212,10 @@ async function initializeDepartmentElection() {
   }
 
   if (data.status === "NO_ELECTION" || data.status === "HIDDEN") {
-    renderDepartmentEmptyState(
-      "No Election Yet",
-      "There is no upcoming or ongoing department election at this time.",
-    );
+     renderDepartmentEmptyState(
+          "No Department Election Scheduled",
+          "There is currently no upcoming or ongoing department election for your department.",
+        );
     return;
   }
 
@@ -217,7 +227,7 @@ async function initializeDepartmentElection() {
       campus: data.campus,
       scheduledStartAt: data.scheduledStartAt,
       scheduledEndAt: data.scheduledEndAt,
-      positions: mapPositionsToObjects(data.positions),
+      positions: sortByPositionOrder(mapPositionsToObjects(data.positions)),
       members: mapCandidatesToMembers(data.candidates),
     };
 
@@ -225,12 +235,9 @@ async function initializeDepartmentElection() {
     initializeGlobalModalEvents();
 
     if (data.hasVoted) {
-    showDepartmentVoteThankYou({
-      referenceNumber: "Already Recorded",
-      votedAt: "",
-    });
-    return;
-  }
+      renderDepartmentAlreadyVoted();
+      return;
+    }
 
   if (data.status === "UPCOMING") {
     renderDepartmentUpcoming();
@@ -252,6 +259,8 @@ async function initializeDepartmentElection() {
     initializeReviewVoting();
 
     initializeLoadingModal();
+
+
 }
 
 /* =========================================================
@@ -260,16 +269,32 @@ async function initializeDepartmentElection() {
 
 function renderDepartmentEmptyState(title, message) {
   const electionContent = document.querySelector(".election-content");
+  if (!electionContent) return;
 
+  electionContent.innerHTML = `
+    <div class="election-instructions">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
+function renderDepartmentAlreadyVoted() {
+  const electionContent = document.querySelector(".election-content");
   if (!electionContent) return;
 
   electionContent.innerHTML = `
     <section class="vote-thank-you">
       <div class="vote-thank-you-icon">
-        <i class="bi bi-info-circle-fill"></i>
+        <i class="bi bi-check-circle-fill"></i>
       </div>
-      <h2>${escapeHtml(title)}</h2>
-      <p>${escapeHtml(message)}</p>
+
+      <h2>You've Already Voted</h2>
+
+      <p>
+        Your vote for "${escapeHtml(departmentElectionData.electionName)}" has already been recorded.
+        You can view your selections in the Vote Summaries tab.
+      </p>
     </section>
   `;
 }
@@ -301,6 +326,8 @@ function renderDepartmentUpcoming() {
   electionContent.innerHTML = `
     <div class="election-info-card"></div>
 
+    <div class="election-view-candidates-action" id="viewCandidatesButtonWrapper"></div>
+
     <div class="election-instructions">
       <h3>Upcoming Election</h3>
       <p>
@@ -317,6 +344,7 @@ function renderDepartmentUpcoming() {
   `;
 
   renderDepartmentElectionInformation();
+  renderDepartmentViewCandidatesButton();
 }
 
 function createDepartmentPositionReadOnly(position) {
@@ -371,6 +399,8 @@ function renderDepartmentElection() {
   electionContent.innerHTML = `
     <div class="election-info-card"></div>
 
+    <div class="election-view-candidates-action" id="viewCandidatesButtonWrapper"></div>
+
     <div class="election-instructions">
       <h3>
         Before You Vote
@@ -389,6 +419,12 @@ function renderDepartmentElection() {
     </div>
 
     <div class="election-action">
+
+    <button type="button" class="secondary-btn" id="clearAllDepartmentVotes">
+        <i class="bi bi-arrow-counterclockwise"></i>
+        Clear All
+      </button>
+
       <button
         type="button"
         class="primary-btn"
@@ -401,6 +437,7 @@ function renderDepartmentElection() {
   `;
 
   renderDepartmentElectionInformation();
+  renderDepartmentViewCandidatesButton();
 }
 
 /* =========================================================
@@ -453,6 +490,47 @@ function renderDepartmentElectionInformation() {
 
     </div>
   `;
+}
+
+/* =========================================================
+   VIEW CANDIDATES BUTTON (opens the shared modal)
+
+   Representative-type departments don't have partylists, so
+   this shows a single group named after the election, with
+   all members inside it (no numbered tabs).
+========================================================= */
+
+function renderDepartmentViewCandidatesButton() {
+  const wrapper = document.getElementById("viewCandidatesButtonWrapper");
+
+  if (!wrapper) return;
+
+  wrapper.innerHTML = `
+    <button type="button" class="view-candidates-btn" id="openDeptViewCandidatesBtn">
+      <i class="bi bi-people-fill"></i>
+      View Candidates
+    </button>
+  `;
+
+  document
+    .getElementById("openDeptViewCandidatesBtn")
+    ?.addEventListener("click", () => {
+      const party = {
+        id: "department",
+        name: departmentElectionData.electionName || departmentElectionData.department,
+        posterImageUrl: "",
+        logoImageUrl: "",
+        members: departmentElectionData.members.map((member) => ({
+          position: member.position || "Candidate",
+          name: member.name,
+          photoImageUrl: member.image,
+          campaignImageUrl: member.campaignImage,
+          backgroundImageUrl: member.backgroundImage,
+        })),
+      };
+
+      openViewCandidatesModal([party]);
+    });
 }
 
 /* =========================================================
@@ -563,6 +641,16 @@ function createDepartmentMemberCard(member, positionId) {
 
         </button>
 
+        <button
+          type="button"
+          class="candidate-clear-btn"
+          data-member-id="${escapeHtml(member.id)}"
+          data-position-id="${escapeHtml(positionId)}"
+          aria-label="Clear selection"
+        >
+          <i class="bi bi-x-lg"></i>
+        </button>
+
       </div>
 
     </article>
@@ -575,18 +663,30 @@ function createDepartmentMemberCard(member, positionId) {
 
 function initializeMemberSelection() {
   document.addEventListener("click", (event) => {
-    const button = event.target.closest(".candidate-select-btn");
+    const selectButton = event.target.closest(".candidate-select-btn");
 
-    if (!button) return;
+    if (selectButton) {
+      const memberId = selectButton.dataset.memberId;
+      const positionId = selectButton.dataset.positionId;
 
-    const memberId = button.dataset.memberId;
+      if (memberId && positionId) {
+        selectDepartmentMember(positionId, memberId);
+      }
+      return;
+    }
 
-    const positionId = button.dataset.positionId;
+    const clearButton = event.target.closest(".candidate-clear-btn");
 
-    if (!memberId || !positionId) return;
-
-    selectDepartmentMember(positionId, memberId);
+    if (clearButton) {
+      const positionId = clearButton.dataset.positionId;
+      if (positionId) clearDepartmentPositionSelection(positionId);
+    }
   });
+}
+
+function clearDepartmentPositionSelection(positionId) {
+  delete departmentElectionState.selections[positionId];
+  updateDepartmentElectionUI();
 }
 
 /* =========================================================
@@ -644,13 +744,22 @@ function updateDepartmentElectionUI() {
       const selectedElsewhere =
         !selectedHere && isMemberSelectedElsewhere(memberId, positionId);
 
+      /*
+       * Dim this card if it's not the chosen one for this
+       * position — either because another member was picked
+       * here, or because this member is locked to a different
+       * position entirely.
+       */
+      const shouldDim =
+        !selectedHere && (selectedElsewhere || Boolean(selectedMemberId));
+
       /* -----------------------------------------
            CARD STATE
         ----------------------------------------- */
 
       card.classList.toggle("selected", selectedHere);
 
-      card.classList.toggle("dimmed", selectedElsewhere);
+      card.classList.toggle("dimmed", shouldDim);
 
       /* -----------------------------------------
            SELECT BUTTON
@@ -665,34 +774,16 @@ function updateDepartmentElectionUI() {
       const icon = button.querySelector("i");
 
       if (selectedHere) {
-        if (label) {
-          label.textContent = "Selected";
-        }
-
-        if (icon) {
-          icon.className = "bi bi-check-circle-fill";
-        }
-
+        if (label) label.textContent = "Selected";
+        if (icon) icon.className = "bi bi-check-circle-fill";
         button.disabled = false;
       } else if (selectedElsewhere) {
-        if (label) {
-          label.textContent = "Already Selected";
-        }
-
-        if (icon) {
-          icon.className = "bi bi-lock-fill";
-        }
-
+        if (label) label.textContent = "Already Selected";
+        if (icon) icon.className = "bi bi-lock-fill";
         button.disabled = true;
       } else {
-        if (label) {
-          label.textContent = "Select";
-        }
-
-        if (icon) {
-          icon.className = "bi bi-check2-circle";
-        }
-
+        if (label) label.textContent = "Select";
+        if (icon) icon.className = "bi bi-check2-circle";
         button.disabled = false;
       }
     });
@@ -856,6 +947,12 @@ function openDepartmentCampaignModal(member) {
     document
       .getElementById("departmentCampaignCloseButton")
       ?.addEventListener("click", closeDepartmentCampaignModal);
+
+       const campaignImg = modal.querySelector("#departmentCampaignImage");
+          window.applyDocImageRatio?.(
+            campaignImg?.closest(".campaign-image-wrapper"),
+            campaignImg,
+          );
   }
 
     const loadingContent = modal.querySelector(".campaign-loading-content");
@@ -933,16 +1030,30 @@ function closeDepartmentCampaignModal() {
 
 function initializeReviewVoting() {
   document.addEventListener("click", (event) => {
-    const button = event.target.closest("#reviewDepartmentVotes");
+    const reviewButton = event.target.closest("#reviewDepartmentVotes");
 
-    if (!button) return;
-
-    if (!validateDepartmentVotes()) {
+    if (reviewButton) {
+      if (!validateDepartmentVotes()) return;
+      openDepartmentReviewModal();
       return;
     }
 
-    openDepartmentReviewModal();
+    const clearAllButton = event.target.closest("#clearAllDepartmentVotes");
+    if (clearAllButton) clearAllDepartmentSelections();
   });
+}
+
+function clearAllDepartmentSelections() {
+  if (Object.keys(departmentElectionState.selections).length === 0) return;
+
+  departmentElectionState.selections = {};
+  updateDepartmentElectionUI();
+
+  showDepartmentToast(
+    "warning",
+    "Selections Cleared",
+    "All your member selections have been cleared.",
+  );
 }
 
 /* =========================================================
@@ -1223,14 +1334,17 @@ async function submitDepartmentVotes() {
       "Vote Submitted",
       "Your vote has been successfully recorded.",
     );
+    renderDepartmentAlreadyVoted();
 
-    showDepartmentVoteThankYou(result);
   } catch (error) {
     console.error("Department vote submission failed:", error);
 
     hideDepartmentLoadingModal();
 
     departmentElectionState.submitting = false;
+
+    const retryBtn = document.getElementById("submitDepartmentVote");
+        if (retryBtn) retryBtn.disabled = false;
 
     showDepartmentToast(
       "error",

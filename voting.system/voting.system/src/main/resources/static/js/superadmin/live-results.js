@@ -24,12 +24,150 @@ document.addEventListener("DOMContentLoaded", () => {
 
 });
 
+async function buildPositionWinnerExportCard(positionName, candidates, options = {}) {
+    const {
+        programCourse = null,
+        campusName = "",
+        electionType = "",
+        rightLogo = "/images/lcccast_logo.png",
+        electionStatus = "concluded",
+        isDraw = false
+    } = options;
+
+    const orderedCandidates = [...candidates].sort((a, b) => Number(b.votes || 0) - Number(a.votes || 0));
+    const totalVotes = orderedCandidates.reduce((total, c) => total + Number(c.votes || 0), 0);
+     const topVotes = Number(orderedCandidates[0]?.votes || 0);
+
+    const bgDataUrl = await cropBackgroundToDataURL("/images/lcc_bg.png", 1200, 900);
+    const exportCard = buildExportCardBase(bgDataUrl);
+
+    exportCard.appendChild(buildExportHeader({ programCourse, campusName, electionType, rightLogo }));
+
+    /* CONTENT — position title + candidate list, same shell as the winner card */
+    const content = document.createElement("div");
+    content.style.flex = "1";
+    content.style.minHeight = "0";
+    content.style.padding = "22px 55px 0";
+    content.style.display = "flex";
+    content.style.flexDirection = "column";
+
+    const titleWrap = document.createElement("div");
+    titleWrap.style.alignSelf = "center";
+    titleWrap.style.marginBottom = "20px";
+    titleWrap.style.textAlign = "center";
+    titleWrap.innerHTML = `
+        <h1 style="
+            margin: 0;
+            color: #FFFFFF;
+            font-size: 46px;
+            font-weight: 900;
+            letter-spacing: -1px;
+            -webkit-text-stroke: 2px #1E3A8A;
+            text-shadow:
+                -1.5px -1.5px 0 #1E3A8A,
+                1.5px -1.5px 0 #1E3A8A,
+                -1.5px 1.5px 0 #1E3A8A,
+                1.5px 1.5px 0 #1E3A8A,
+                0 0 18px rgba(59, 91, 235, .65),
+                0 0 34px rgba(59, 91, 235, .45);
+        ">${escapeHTML(positionName)}</h1>
+    `;
+    content.appendChild(titleWrap);
+
+    const list = document.createElement("div");
+    list.className = "position-export-candidates";
+    list.style.flex = "1";
+    list.style.minHeight = "0";
+    list.style.overflow = "hidden";
+
+    list.innerHTML = orderedCandidates.map((candidate, index) => {
+        const votes = Number(candidate.votes || 0);
+        const percentage = totalVotes > 0 ? (votes / totalVotes) * 100 : 0;
+           const isTop = votes === topVotes && topVotes > 0;
+           const showLabel = isDraw ? isTop : index === 0;
+           const labelText = isDraw ? "DRAW — NO OFFICIAL WINNER"
+               : (electionStatus === "concluded" ? "OFFICIAL WINNER" : "LEADING CANDIDATE");
+
+        return `
+            <div class="position-export-candidate ${!isDraw && index === 0 ? "is-leading" : ""}">
+                ${showLabel ? `
+                    <div class="position-export-leading-label">
+                        <i class="bi bi-trophy-fill"></i>
+                        ${labelText}
+                    </div>` : ""}
+                <div class="position-export-candidate-photo">
+                    <img src="${resolveCandidateImage(candidate.photo)}" alt="${escapeHTML(candidate.name || "Candidate")}">
+                </div>
+                <div class="position-export-candidate-info">
+                    <h2>${escapeHTML(candidate.name || "Unknown Candidate")}</h2>
+                    <p>${escapeHTML(candidate.partylist || "Independent")}</p>
+                    <div class="position-export-candidate-stats">
+                        <div>
+                            <strong>${votes.toLocaleString()}</strong>
+                            <span>VOTES</span>
+                        </div>
+                        <div>
+                            <strong>${percentage.toFixed(1)}%</strong>
+                            <span>VOTE SHARE</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join("");
+
+    list.querySelectorAll("img").forEach(image => {
+        image.onerror = () => { image.src = DEFAULT_CANDIDATE_IMAGE; };
+    });
+
+    content.appendChild(list);
+    exportCard.appendChild(content);
+    exportCard.appendChild(buildExportFooter());
+
+    return exportCard;
+}
+
+function findCandidateInPositions(positions, positionLabel, name) {
+    if (!positions) return null;
+    const searchName = String(name).trim().toLowerCase();
+
+    for (const [key, candidates] of Object.entries(positions)) {
+        const standard = findStandardPosition(key);
+        const label = standard ? standard.label : key;
+        if (label !== positionLabel) continue;
+
+        const candidate = (candidates || []).find(
+            item => String(item.name).trim().toLowerCase() === searchName
+        );
+        if (candidate) return candidate;
+    }
+
+    return null;
+}
+
 
 /* =========================================================
    GLOBAL STATE
 ========================================================= */
 
 let liveResultsData = null;
+
+const DEPARTMENT_LOGOS = {
+    "BSIS": "/images/IS_logo.png",
+    "BSBA": "/images/BA_logo.png",
+    // add the rest of your programs here, e.g.:
+    // "BSED": "/images/ED_logo.png",
+    // "BSCRIM": "/images/CRIM_logo.png",
+    // "BSHM": "/images/HM_logo.png",
+};
+
+const DEFAULT_DEPARTMENT_LOGO = "/images/dept_logo.png"; // fallback if code not in the map
+
+function resolveDepartmentLogo(programCourse) {
+    if (!programCourse) return DEFAULT_DEPARTMENT_LOGO;
+    const code = String(programCourse).trim().toUpperCase();
+    return DEPARTMENT_LOGOS[code] || DEFAULT_DEPARTMENT_LOGO;
+}
 
 /* =========================================================
    CREATE ANONYMOUS CANDIDATE DATA
@@ -76,6 +214,148 @@ function resolveCandidateImage(photoPath) {
     return `/files/${photoPath}`;
 }
 
+/* =========================================================
+   BACKGROUND CROP (exact 4:3, done in canvas — not CSS cover)
+========================================================= */
+
+function loadImageForExport(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+async function cropBackgroundToDataURL(src, targetWidth, targetHeight) {
+    try {
+        const img = await loadImageForExport(src);
+        const canvas = document.createElement("canvas");
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext("2d");
+
+        const targetRatio = targetWidth / targetHeight;
+        const imgRatio = img.width / img.height;
+
+        let sx, sy, sWidth, sHeight;
+
+        if (imgRatio > targetRatio) {
+            sHeight = img.height;
+            sWidth = sHeight * targetRatio;
+            sx = (img.width - sWidth) / 2;
+            sy = 0;
+        } else {
+            sWidth = img.width;
+            sHeight = sWidth / targetRatio;
+            sx = 0;
+            sy = (img.height - sHeight) / 2;
+        }
+
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
+        return canvas.toDataURL("image/png");
+    } catch (error) {
+        console.error("Background crop failed, falling back to CSS cover:", error);
+        return null;
+    }
+}
+
+function buildExportHeader(options) {
+    const { programCourse = null, campusName = "", electionType = "", rightLogo = "/images/lcccast_logo.png" } = options;
+
+    const header = document.createElement("div");
+    header.style.width = "100%";
+    header.style.boxSizing = "border-box";
+    header.style.flexShrink = "0";
+    header.style.display = "flex";
+    header.style.alignItems = "center";
+    header.style.justifyContent = "space-between";
+    header.style.gap = "20px";
+    header.style.padding = "20px 40px";
+    header.style.background = "rgba(255,255,255,.97)";
+    header.style.boxShadow = "0 4px 18px rgba(15,23,42,.18)";
+
+    const leftLogo = document.createElement("img");
+    leftLogo.src = "/images/lcccast_logo.png";
+    leftLogo.style.width = "52px";
+    leftLogo.style.height = "52px";
+    leftLogo.style.objectFit = "contain";
+    leftLogo.style.flexShrink = "0";
+    leftLogo.onerror = () => { leftLogo.style.visibility = "hidden"; };
+
+    const titleBlock = document.createElement("div");
+    titleBlock.style.flex = "1";
+    titleBlock.style.textAlign = "center";
+
+    const mainTitle = document.createElement("div");
+    mainTitle.textContent = programCourse
+        ? `${programCourse} ELECTION RESULTS`.toUpperCase()
+        : "OFFICIAL ELECTION RESULTS";
+    mainTitle.style.fontSize = "24px";
+    mainTitle.style.fontWeight = "800";
+    mainTitle.style.lineHeight = "1.15";
+    mainTitle.style.letterSpacing = ".5px";
+
+    const subtitleElement = document.createElement("div");
+    subtitleElement.textContent = programCourse
+        ? `${programCourse} - ${campusName} - ${electionType}`
+        : `${campusName} - ${electionType}`;
+    subtitleElement.style.marginTop = "5px";
+    subtitleElement.style.fontSize = "12px";
+    subtitleElement.style.color = "#6B7280";
+
+    titleBlock.appendChild(mainTitle);
+    titleBlock.appendChild(subtitleElement);
+
+    const rightLogoImg = document.createElement("img");
+    rightLogoImg.src = rightLogo;
+    rightLogoImg.style.width = "52px";
+    rightLogoImg.style.height = "52px";
+    rightLogoImg.style.objectFit = "contain";
+    rightLogoImg.style.flexShrink = "0";
+    rightLogoImg.onerror = () => { rightLogoImg.style.visibility = "hidden"; };
+
+    header.appendChild(leftLogo);
+    header.appendChild(titleBlock);
+    header.appendChild(rightLogoImg);
+
+    return header;
+}
+
+function buildExportCardBase(bgDataUrl) {
+    const exportCard = document.createElement("div");
+    exportCard.style.position = "fixed";
+    exportCard.style.left = "-10000px";
+    exportCard.style.top = "0";
+    exportCard.style.width = "1200px";
+    exportCard.style.height = "900px";
+    exportCard.style.boxSizing = "border-box";
+    exportCard.style.backgroundColor = "#FFFFFF";
+    exportCard.style.backgroundImage = bgDataUrl ? `url("${bgDataUrl}")` : 'url("/images/lcc_bg.png")';
+    exportCard.style.backgroundSize = "cover";
+    exportCard.style.backgroundPosition = "center";
+    exportCard.style.backgroundRepeat = "no-repeat";
+    exportCard.style.fontFamily = "Arial, Helvetica, sans-serif";
+    exportCard.style.color = "#202334";
+    exportCard.style.overflow = "hidden";
+    exportCard.style.display = "flex";
+    exportCard.style.flexDirection = "column";
+    return exportCard;
+}
+
+function buildExportFooter() {
+    const footer = document.createElement("div");
+    footer.textContent = "LCC Cast - Official Election Results";
+    footer.style.flexShrink = "0";
+    footer.style.textAlign = "center";
+    footer.style.padding = "14px 0 20px";
+    footer.style.fontSize = "11px";
+    footer.style.fontWeight = "600";
+    footer.style.color = "#FFFFFF";
+    footer.style.textShadow = "0 1px 4px rgba(0,0,0,.45)";
+    return footer;
+}
 
 let currentLiveSection = "ssc";
 
@@ -106,47 +386,100 @@ const POSITIONS = [
 
     {
         key: "President",
-        label: "President"
+        label: "President",
+        aliases: ["president", "pres"]
     },
 
     {
         key: "VP",
-        label: "VP"
+        label: "Vice President",
+        aliases: ["vp", "vicepresident", "vicepres"]
     },
 
     {
         key: "Secretary",
-        label: "Secretary"
+        label: "Secretary",
+        aliases: ["secretary", "sec"]
     },
 
     {
         key: "Treasurer",
-        label: "Treasurer"
+        label: "Treasurer",
+        aliases: ["treasurer", "treas"]
     },
 
     {
         key: "Auditor",
-        label: "Auditor"
+        label: "Auditor",
+        aliases: ["auditor", "audit"]
     },
 
     {
         key: "PRO Internal",
-        label: "PRO Internal"
+        label: "PRO Internal",
+        aliases: ["prointernal", "internalpro", "proint", "prointl"]
     },
 
     {
         key: "PRO External",
-        label: "PRO External"
+        label: "PRO External",
+        aliases: ["proexternal", "externalpro", "proext", "proextl"]
     }
 
 ];
 
+function normalizePositionKey(key) {
+
+    return String(key)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+}
+
+function findStandardPosition(key) {
+
+    const normalized = normalizePositionKey(key);
+
+    return POSITIONS.find(position =>
+        normalizePositionKey(position.key) === normalized ||
+        (position.aliases || []).includes(normalized)
+    ) || null;
+
+}
+
+function getOrderedPositionKeys(positions) {
+
+    const rank = key => {
+        const standard = findStandardPosition(key);
+        return standard
+            ? POSITIONS.indexOf(standard)
+            : POSITIONS.length;
+    };
+
+    return Object.keys(positions || {})
+        .map((key, originalIndex) => ({ key, originalIndex }))
+        .sort((a, b) =>
+            rank(a.key) - rank(b.key) ||
+            a.originalIndex - b.originalIndex
+        )
+        .map(item => item.key);
+
+}
+
 function getPositionList(positions) {
-    const keys = Object.keys(positions || {});
-    return keys.map(key => {
-        const standard = POSITIONS.find(p => p.key === key);
-        return standard || { key, label: key };
+
+    return getOrderedPositionKeys(positions).map(key => {
+
+        const standard = findStandardPosition(key);
+
+        // keep the REAL key from the data so positions[key] still works
+        return {
+            key,
+            label: standard ? standard.label : key
+        };
+
     });
+
 }
 
 //
@@ -174,6 +507,27 @@ function getPositionList(positions) {
 
 function getElectionStatus(entity) {
     return String(entity?.phase || "UPCOMING").toLowerCase();
+}
+
+const STATUS_LABELS = { ongoing: "ONGOING", upcoming: "UPCOMING", concluded: "CONCLUDED", unscheduled: "SCHEDULE PENDING" };
+
+function getDrawPositions(entity) {
+    return getElectionStatus(entity) === "concluded" ? (entity?.drawPositions || []) : [];
+}
+function drawBadgeHTML(entity) {
+    return entity?.drawElection
+        ? `<span class="draw-election-badge"><i class="bi bi-shuffle"></i> DRAW ELECTION</span>` : "";
+}
+function statusMessage(entity, status) {
+    if (status === "unscheduled") return "Waiting for the voting schedule to be set.";
+    if (status === "ongoing") return "Voting is currently in progress.";
+    if (status === "concluded") {
+        const draws = getDrawPositions(entity);
+        return draws.length
+            ? `${escapeHTML(entity.drawMessage || "Draw — no official winner yet.")} Tie-break needed for: ${draws.map(d => escapeHTML(d)).join(", ")}.`
+            : "Election officially concluded.";
+    }
+    return "Voting has not started yet.";
 }
 
 
@@ -258,36 +612,14 @@ async function initializeLiveResults() {
 
 }
 
-
-/* =========================================================
-   BACKEND DATA LOADER
-=========================================================
-
-   Later replace with:
-
-   async function loadLiveResultsData() {
-
-       const response =
-           await fetch(
-               "/api/superadmin/live-results"
-           );
-
-       if (!response.ok) {
-           throw new Error(
-               "Failed to load live results"
-           );
-       }
-
-       return await response.json();
-
-   }
-
-========================================================= */
-
 async function loadLiveResultsData() {
-    const response = await fetch("/superadmin/live-results/data");
-    if (!response.ok) throw new Error("Failed to load live results");
-    return await response.json();
+    return SoftCache.load("/superadmin/live-results/data", {
+        ttl: 10000,
+        onRevalidated: fresh => {
+            liveResultsData = fresh;
+            updateLiveVotesInPlace(fresh);
+        }
+    });
 }
 
 let stompClient = null;
@@ -309,11 +641,32 @@ function connectLiveResultsSocket() {
    UPDATE LIVE VOTES IN PLACE (no re-render, no scroll jump)
 ========================================================= */
 
+function hasStaleCards(entities, prefix, containerId) {
+    const liveIds = new Set(entities.map(e => `${prefix}-${e.id}`));
+
+    return [...document.querySelectorAll(
+        `#${containerId} > .result-entity-container[id]`
+    )].some(card => !liveIds.has(card.id));
+}
+
 function updateLiveVotesInPlace(newData) {
 
-    updateEntityGroupInPlace(newData?.ssc || [], "campus");
-    updateEntityGroupInPlace(newData?.departments || [], "department");
+    const ssc = newData?.ssc || [];
+    const departments = newData?.departments || [];
 
+    // An election was archived/deleted: its card is no longer in the payload
+    const stale =
+        hasStaleCards(ssc, "campus", "sscCampusResultsContainer") ||
+        hasStaleCards(departments, "department", "departmentLiveContainer");
+
+    if (stale) {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        renderLiveResults();
+        return;
+    }
+
+    updateEntityGroupInPlace(ssc, "campus");
+    updateEntityGroupInPlace(departments, "department");
 }
 
 function updateEntityGroupInPlace(entities, prefix) {
@@ -647,12 +1000,15 @@ function populateLiveFilters() {
         });
     }
 
-    if (deptFilter) {
-        deptFilter.innerHTML = `<option value="ALL">All Departments</option>`;
-        (liveResultsData?.departments || []).forEach(d => {
-            deptFilter.innerHTML += `<option value="${d.key}">${escapeHTML(d.name)}</option>`;
-        });
-    }
+        if (deptFilter) {
+            deptFilter.innerHTML = `<option value="ALL">All Departments</option>`;
+            const seenKeys = new Set();
+            (liveResultsData?.departments || []).forEach(d => {
+                if (seenKeys.has(d.key)) return;
+                seenKeys.add(d.key);
+                deptFilter.innerHTML += `<option value="${d.key}">${escapeHTML(d.name)}</option>`;
+            });
+        }
 }
 
 /* =========================================================
@@ -1032,15 +1388,12 @@ function createCampusResultCard(campusKey, campus) {
 
     const electionStatus = getElectionStatus(campus);
 
-    const statusLabel = {
-        ongoing: "ONGOING",
-        upcoming: "UPCOMING",
-        concluded: "CONCLUDED"
-    }[electionStatus] || "UPCOMING";
+    const statusLabel = STATUS_LABELS[electionStatus] || "UPCOMING";
 
     const campusName = campus.campusName || "Campus";
     const electionTitle = campus.name || "SSC Election";
-    const votesCast = Number(campus.votesCast ?? campus.totalVotes ?? 0);
+        const votesCast = Number(campus.votesCast ?? campus.totalVotes ?? 0);
+        const drawPositions = getDrawPositions(campus);
 
     card.innerHTML = `
 
@@ -1052,33 +1405,16 @@ function createCampusResultCard(campusKey, campus) {
                     CAMPUS
                 </span>
 
-                <div class="result-entity-title-row">
-
-                    <h2>
-                        ${escapeHTML(campusName)}
-                    </h2>
-
-                    <span
-                        class="
-                            election-status
-                            status-${electionStatus}
-                        "
-                    >
-                        ${statusLabel}
-                    </span>
-
-                </div>
+                                <div class="result-entity-title-row">
+                                    <h2>${escapeHTML(campusName)}</h2>
+                                    <span class="election-status status-${electionStatus}">${statusLabel}</span>
+                                    ${drawBadgeHTML(campus)}
+                                </div>
 
                 <p>
                     <strong>${escapeHTML(electionTitle)}</strong><br>
 
-                    ${
-                        electionStatus === "ongoing"
-                            ? "Voting is currently in progress."
-                            : electionStatus === "concluded"
-                                ? "Election officially concluded."
-                                : "Voting has not started yet."
-                    }
+                    ${statusMessage(campus, electionStatus)}
                 </p>
 
             </div>
@@ -1231,10 +1567,7 @@ function createCampusResultCard(campusKey, campus) {
         winnerContainer.appendChild(winnerSection);
 
 
-        renderWinnerList(
-            winnerSection.querySelector(".winner-list"),
-            campus.positions
-        );
+        renderWinnerList(winnerSection.querySelector(".winner-list"), campus.positions, drawPositions);
 
 
         /* =====================================================
@@ -1279,13 +1612,18 @@ function createCampusResultCard(campusKey, campus) {
         positionContainer.appendChild(positionSection);
 
 
-        renderPositionWinnerCards(
-            positionSection.querySelector(
-                ".position-winners-grid"
-            ),
-            campus.positions,
-            `ssc-${campusKey}`
-        );
+                renderPositionWinnerCards(
+                    positionSection.querySelector(".position-winners-grid"),
+                    campus.positions,
+                    `ssc-${campusKey}`,
+                    {
+                        campusName: campusName,
+                        electionType: "Supreme Student Council",
+                        rightLogo: "/images/ssc_logo.png",
+                        positions: campus.positions,
+                        drawPositions: drawPositions
+                    }
+                );
 
 
         /* =====================================================
@@ -1301,14 +1639,15 @@ function createCampusResultCard(campusKey, campus) {
             "click",
             () => {
 
-                downloadWinnerCard(
-                    winnerSection.querySelector(
-                        ".winner-card-content"
-                    ),
-                    "Supreme Student Council",
-                    campusName,
-                    electionTitle
-                );
+                                downloadWinnerCard(
+                                    winnerSection.querySelector(".winner-card-content"),
+                                    {
+                                        campusName: campusName,
+                                        electionType: "Supreme Student Council",
+                                        rightLogo: "/images/ssc_logo.png",
+                                        positions: campus.positions
+                                    }
+                                );
 
             }
         );
@@ -1330,12 +1669,13 @@ function createCampusResultCard(campusKey, campus) {
        LIVE VOTING RESULTS
     ========================================================= */
 
-    renderPositionsGrid(
-        card.querySelector(".positions-grid"),
-        campus.positions,
-        campusKey,
-        false
-    );
+        renderPositionsGrid(
+            card.querySelector(".positions-grid"),
+            campus.positions,
+            campusKey,
+            false,
+            drawPositions
+        );
 
 
     return card;
@@ -1346,111 +1686,51 @@ function createCampusResultCard(campusKey, campus) {
    RENDER WINNERS
 ========================================================= */
 
-function renderWinnerList(
-    container,
-    positions
-) {
-
+function renderWinnerList(container, positions, drawPositions = []) {
     if (!container) return;
-
-
     container.innerHTML = "";
 
-
     getPositionList(positions).forEach(position => {
+        const candidates = positions?.[position.key] || [];
+        if (!candidates.length) return;
 
-        const candidates =
-            positions?.[position.key] || [];
+        const sorted = [...candidates].sort((a, b) => Number(b.votes || 0) - Number(a.votes || 0));
 
-
-        if (!candidates.length) {
+        if (drawPositions.includes(position.key)) {
+            const top = Number(sorted[0].votes || 0);
+            const tied = sorted.filter(c => Number(c.votes || 0) === top);
+            const draw = document.createElement("div");
+            draw.className = "draw-item";          // not "winner-item", so the PNG export skips it
+            draw.innerHTML = `
+                <div class="winner-item-info">
+                    <span>${escapeHTML(position.label)}</span>
+                    <strong>DRAW — no official winner yet</strong>
+                    <small>${tied.map(c => escapeHTML(c.name)).join(" vs ")} · ${top} vote${top === 1 ? "" : "s"} each</small>
+                </div>`;
+            container.appendChild(draw);
             return;
         }
 
-
-        /*
-           Winner cards only exist after
-           the election has ended.
-
-           Therefore always use the
-           original candidate information.
-        */
-
-        const winner =
-            [...candidates]
-                .sort(
-                    (a, b) =>
-                        Number(b.votes || 0) -
-                        Number(a.votes || 0)
-                )[0];
-
-
-        const item =
-            document.createElement("div");
-
-
-        item.className =
-            "winner-item";
-
-
+        const winner = sorted[0];
+        const item = document.createElement("div");
+        item.className = "winner-item";
         item.innerHTML = `
-
-            <img
-                src="${resolveCandidateImage(winner.photo)}"
-                alt="${escapeHTML(winner.name)}"
-            >
-
+            <img src="${resolveCandidateImage(winner.photo)}" alt="${escapeHTML(winner.name)}">
             <div class="winner-item-info">
-
-                <span>
-                    ${escapeHTML(position.label)}
-                </span>
-
-                <strong>
-                    ${escapeHTML(winner.name)}
-                </strong>
-
+                <span>${escapeHTML(position.label)}</span>
+                <strong>${escapeHTML(winner.name)}</strong>
             </div>
-
-
             <div class="winner-item-votes">
-
-                <strong>
-                    ${Number(winner.votes || 0)}
-                </strong>
-
-                <span>
-                    Votes
-                </span>
-
-            </div>
-
-        `;
-
-
-        const image =
-            item.querySelector("img");
-
-
-        image.onerror = () => {
-
-            image.src =
-                DEFAULT_CANDIDATE_IMAGE
-
-        };
-
-
+                <strong>${Number(winner.votes || 0)}</strong>
+                <span>Votes</span>
+            </div>`;
+        const image = item.querySelector("img");
+        image.onerror = () => { image.src = DEFAULT_CANDIDATE_IMAGE; };
         container.appendChild(item);
-
     });
-
 }
 
-function renderPositionWinnerCards(
-    container,
-    positions,
-    exportPrefix
-) {
+function renderPositionWinnerCards(container, positions, exportPrefix, cardOptions = {}) {
 
     if (!container) return;
 
@@ -1464,6 +1744,8 @@ function renderPositionWinnerCards(
         if (!candidates.length) {
             return;
         }
+
+        const isDraw = (cardOptions.drawPositions || []).includes(position.key);
 
         /*
            Highest voter is always first.
@@ -1498,9 +1780,7 @@ function renderPositionWinnerCards(
                         Position
                     </span>
 
-                    <h3>
-                        ${escapeHTML(position.label)}
-                    </h3>
+                       <h3>${escapeHTML(position.label)} ${isDraw ? '<span class="draw-chip">DRAW</span>' : ""}</h3>
                 </div>
 
                 <button
@@ -1611,19 +1891,9 @@ function renderPositionWinnerCards(
                 ".download-position-btn"
             );
 
-        downloadButton?.addEventListener(
-            "click",
-            () => {
-
-                downloadPositionWinnerCard(
-                    positionCard,
-                    position.label,
-                    exportPrefix,
-                    orderedCandidates
-                );
-
-            }
-        );
+        downloadButton?.addEventListener("click", () => {
+                   downloadPositionWinnerCard(position.label, exportPrefix, orderedCandidates, { ...cardOptions, isDraw });
+            });
 
         container.appendChild(
             positionCard
@@ -1636,80 +1906,21 @@ function renderPositionWinnerCards(
    RENDER POSITIONS GRID
 ========================================================= */
 
-function renderPositionsGrid(
-    container,
-    positions,
-    campusKey,
-    isAnonymous = false
-) {
-
+function renderPositionsGrid(container, positions, campusKey, isAnonymous = false, drawPositions = []) {
     if (!container) return;
-
-
     container.innerHTML = "";
 
+    getPositionList(positions).forEach(position => {
+        const ordered = getDisplayCandidates(
+            positions?.[position.key] || [], isAnonymous, `${campusKey}-${position.key}`);
+        const display = isAnonymous
+            ? ordered.map((c, i) => createAnonymousCandidate(c, i))
+            : ordered;
 
-    const positionKeys = Object.keys(positions || {});
-        const isStandardPositions = positionKeys.every(
-            k => POSITIONS.some(p => p.key === k)
-        );
-        const positionList = positionKeys.map(key => {
-            const standardPosition = POSITIONS.find(
-                position => position.key === key
-            );
-
-            return standardPosition || {
-                key,
-                label: key
-            };
-        });
-
-        positionList.forEach(position => {
-
-        const originalCandidates =
-            positions?.[position.key] || [];
-
-
-        /*
-           Randomize candidates only when
-           the election is currently running.
-        */
-
-        const orderedCandidates =
-            getDisplayCandidates(
-                originalCandidates,
-                isAnonymous,
-                `${campusKey}-${position.key}`
-            );
-
-
-        /*
-           Create anonymous display identities.
-        */
-
-        const displayCandidates =
-            isAnonymous
-                ? orderedCandidates.map(
-                    (candidate, index) =>
-                        createAnonymousCandidate(
-                            candidate,
-                            index
-                        )
-                )
-                : orderedCandidates;
-
-
-        container.appendChild(
-            createPositionColumn(
-                position,
-                displayCandidates,
-                `${campusKey}-${position.key}`,
-                isAnonymous
-            )
-        );
-
+        container.appendChild(createPositionColumn(
+            position, display, `${campusKey}-${position.key}`,
+            isAnonymous, drawPositions.includes(position.key)));
     });
-
 }
 
 
@@ -1862,15 +2073,8 @@ function createDepartmentCard(
         );
 
 
-       const statusLabel = {
-
-           ongoing: "ONGOING",
-
-           upcoming: "UPCOMING",
-
-           concluded: "CONCLUDED"
-
-       }[electionStatus] || "UPCOMING";
+           const statusLabel = STATUS_LABELS[electionStatus] || "UPCOMING";
+           const drawPositions = getDrawPositions(department);
 
 
     card.innerHTML = `
@@ -1888,23 +2092,11 @@ function createDepartmentCard(
                 </span>
 
 
-                <div class="result-entity-title-row">
-
-                    <h2>
-                        ${escapeHTML(departmentName)}
-                    </h2>
-
-
-                    <span
-                        class="
-                            election-status
-                            status-${electionStatus}
-                        "
-                    >
-                        ${statusLabel}
-                    </span>
-
-                </div>
+                                <div class="result-entity-title-row">
+                                    <h2>${escapeHTML(departmentName)}</h2>
+                                    <span class="election-status status-${electionStatus}">${statusLabel}</span>
+                                    ${drawBadgeHTML(department)}
+                                </div>
 
 
                 <h3 class="result-entity-subtitle">
@@ -1925,6 +2117,10 @@ function createDepartmentCard(
                     Campus
 
                 </p>
+
+                ${electionStatus === "unscheduled" || getDrawPositions(department).length
+                                    ? `<p>${statusMessage(department, electionStatus)}</p>`
+                                    : ""}
 
             </div>
 
@@ -2120,15 +2316,7 @@ function createDepartmentCard(
         );
 
 
-        renderWinnerList(
-
-            winnerSection.querySelector(
-                ".winner-list"
-            ),
-
-            department.positions
-
-        );
+                renderWinnerList(winnerSection.querySelector(".winner-list"), department.positions, drawPositions);
 
 
         /* =====================================================
@@ -2189,17 +2377,20 @@ function createDepartmentCard(
         );
 
 
-        renderPositionWinnerCards(
-
-            positionSection.querySelector(
-                ".position-winners-grid"
-            ),
-
-            department.positions,
-
-            `department-${departmentCode}`
-
-        );
+                renderPositionWinnerCards(
+                    positionSection.querySelector(".position-winners-grid"),
+                    department.positions,
+                    `department-${departmentCode}`,
+                    {
+                        programCourse: departmentName,
+                        campusName: campusName,
+                        electionType: "Departmental Election",
+                        rightLogo: resolveDepartmentLogo(departmentName),
+                        positions: department.positions,
+                        isRepresentative: department.votingType === "REPRESENTATIVE",
+                        drawPositions: drawPositions
+                    }
+                );
 
 
         const downloadButton =
@@ -2212,20 +2403,17 @@ function createDepartmentCard(
             "click",
             () => {
 
-                downloadWinnerCard(
-
-                    winnerSection.querySelector(
-                        ".winner-card-content"
-                    ),
-
-                    departmentName,
-
-                    campusName,
-
-                    `${departmentCode} Department Election`
-
-                );
-
+               downloadWinnerCard(
+                   winnerSection.querySelector(".winner-card-content"),
+                   {
+                       programCourse: departmentName,
+                       campusName: campusName,
+                       electionType: "Departmental Election",
+                       rightLogo: resolveDepartmentLogo(departmentName),
+                       positions: department.positions,                              // ADD
+                        isRepresentative: department.votingType === "REPRESENTATIVE"   // ADD
+                   }
+               );
             }
         );
 
@@ -2247,37 +2435,13 @@ function createDepartmentCard(
        VOTING RESULTS
     ========================================================= */
 
-    renderPositionsGrid(
-        card.querySelector(".positions-grid"),
-        department.positions,
-        departmentCode,
-        false
-    );
-
-
-    const downloadButton =
-        card.querySelector(
-            "[data-download-winners]"
+        renderPositionsGrid(
+            card.querySelector(".positions-grid"),
+            department.positions,
+            departmentCode,
+            false,
+            drawPositions
         );
-
-
-
-
-    downloadButton?.addEventListener(
-        "click",
-        () => {
-
-            downloadWinnerCard(
-                card.querySelector(
-                    ".winner-card-content"
-                ),
-                departmentName,
-                campusName,
-                `${departmentCode} Department Election`
-            );
-
-        }
-    );
 
 
     return card;
@@ -2481,140 +2645,44 @@ function createAnonymousCandidate(candidate, anonymousIndex) {
    CREATE POSITION COLUMN
 ========================================================= */
 
-function createPositionColumn(
-    position,
-    candidates,
-    positionId,
-    isAnonymous = false
-) {
+function createPositionColumn(position, candidates, positionId, isAnonymous = false, isDraw = false) {
+    const column = document.createElement("div");
+    column.className = "position-column";
+    column.classList.add(`position-${position.key.toLowerCase().replace(/\s+/g, "-")}`);
+    column.dataset.position = position.key;
 
-    const column =
-        document.createElement(
-            "div"
-        );
+    const heading = document.createElement("div");
+    heading.className = "position-heading";
+    heading.textContent = position.label;
+    column.appendChild(heading);
 
-
-    column.className =
-        "position-column";
-
-    column.classList.add(
-        `position-${position.key
-            .toLowerCase()
-            .replace(/\s+/g, "-")}`
-    );
-
-
-    column.dataset.position =
-        position.key;
-
-
-    const heading =
-        document.createElement(
-            "div"
-        );
-
-
-    heading.className =
-        "position-heading";
-
-
-    heading.textContent =
-        position.label;
-
-
-    column.appendChild(
-        heading
-    );
-
-
-    if (
-        !candidates ||
-        candidates.length === 0
-    ) {
-
-        const empty =
-            document.createElement(
-                "div"
-            );
-
-
-        empty.className =
-            "live-no-candidate";
-
-
-        empty.textContent =
-            "No candidates";
-
-
-        column.appendChild(
-            empty
-        );
-
-
+    if (!candidates || candidates.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "live-no-candidate";
+        empty.textContent = "No candidates";
+        column.appendChild(empty);
         return column;
-
     }
 
+    if (isDraw) {
+        const note = document.createElement("div");
+        note.className = "position-draw-note";
+        note.textContent = "DRAW — no official winner yet";
+        column.appendChild(note);
+    }
 
-    /*
-       Calculate the total votes
-       for THIS position only.
-    */
+    const totalPositionVotes = candidates.reduce((t, c) => t + Number(c.votes || 0), 0);
+    const top = Number(candidates[0]?.votes || 0);
 
-    const totalPositionVotes =
-        candidates.reduce(
-            (total, candidate) => {
-
-                return total +
-                    Number(
-                        candidate.votes || 0
-                    );
-
-            },
-            0
-        );
-
-
-    candidates.forEach(
-        (
-            candidate,
-            index
-        ) => {
-
-            const candidateRow =
-                createCandidateRow(
-                    candidate,
-                    positionId,
-                    totalPositionVotes
-                );
-
-
-            /*
-               First candidate is always
-               the current leader.
-            */
-
-            if (index === 0) {
-
-                candidateRow.classList.add(
-                    "is-leading"
-                );
-
-            }
-
-
-            column.appendChild(
-                candidateRow
-            );
-
-        }
-    );
-
+    candidates.forEach((candidate, index) => {
+        const row = createCandidateRow(candidate, positionId, totalPositionVotes);
+        if (isDraw && Number(candidate.votes || 0) === top) row.classList.add("is-draw");
+        else if (!isDraw && index === 0) row.classList.add("is-leading");
+        column.appendChild(row);
+    });
 
     return column;
-
 }
-
 
 /* =========================================================
    CREATE CANDIDATE ROW
@@ -2978,1013 +3046,329 @@ function updateElement(
 /* =========================================================
    DOWNLOAD WINNER CARD AS DESIGNED 4:3 PNG
 ========================================================= */
+function createExportWinnerBox(item, imageSize, positions = null, isRepresentative = false) {
 
-async function downloadWinnerCard(
-    element,
-    title,
-    campusName,
-    subtitle
-) {
+    const image = item.querySelector("img");
+    const positionSpan = item.querySelector(".winner-item-info span");
+    const name = item.querySelector(".winner-item-info strong");
 
-    if (
-        !element ||
-        typeof html2canvas === "undefined"
-    ) {
-        return;
+    const nameText = (name?.textContent || "").trim();
+    const positionLabel = (positionSpan?.textContent || "").trim();
+
+    let partylist = "Independent";
+    if (!isRepresentative) {
+        const originalCandidate = findCandidateInPositions(positions, positionLabel, nameText);
+        partylist = originalCandidate?.partylist || "Independent";
+    } else {
+        partylist = "";   // representative-type departments have no partylist concept
     }
+
+    const box = document.createElement("div");
+
+    Object.assign(box.style, {
+        boxSizing: "border-box",
+        padding: "12px 14px",
+        border: "1px solid #E5E7EB",
+        borderRadius: "18px",
+        background: "#F9FAFB",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        overflow: "hidden"
+    });
+
+    const candidateImage = document.createElement("img");
+
+    candidateImage.src = image?.src || DEFAULT_CANDIDATE_IMAGE;
+
+    Object.assign(candidateImage.style, {
+        width: `${imageSize}px`,
+        height: `${imageSize}px`,
+        borderRadius: "14px",
+        objectFit: "cover",
+        border: "2px solid #E1E4EC",
+        background: "#F0F2F7",
+        marginBottom: "8px"
+    });
+
+    candidateImage.onerror = () => {
+        candidateImage.src = DEFAULT_CANDIDATE_IMAGE;
+    };
+
+    const candidateName = document.createElement("div");
+
+    candidateName.textContent = nameText || "Unknown Candidate";
+
+    Object.assign(candidateName.style, {
+        fontSize: "16px",
+        fontWeight: "800",
+        lineHeight: "1.15",
+        maxWidth: "260px",
+        marginBottom: "4px"
+    });
+
+    const candidatePosition = document.createElement("div");
+
+    candidatePosition.textContent = (positionSpan?.textContent || "").trim();
+
+    Object.assign(candidatePosition.style, {
+        fontSize: "11px",
+        fontWeight: "700",
+        textTransform: "uppercase",
+        letterSpacing: "1px",
+        marginBottom: "3px"
+    });
+
+    const candidatePartylist = document.createElement("div");
+
+    candidatePartylist.textContent = partylist;
+
+    Object.assign(candidatePartylist.style, {
+        fontSize: "12px",
+        color: "#6B7280",
+        lineHeight: "1.3",
+        maxWidth: "260px"
+    });
+
+    box.appendChild(candidateImage);
+    box.appendChild(candidateName);
+    box.appendChild(candidatePosition);
+    box.appendChild(candidatePartylist);
+
+    return box;
+
+}
+
+async function downloadWinnerCard(element, options) {
+    const {
+        programCourse = null,
+        campusName = "",
+        electionType = "",
+        rightLogo = "/images/lcccast_logo.png",
+        positions = null,          // ADD
+        isRepresentative = false   // ADD
+    } = options || {};
+
+    if (!element || typeof html2canvas === "undefined") return;
 
     try {
+        const winnerItems = element.querySelectorAll(".winner-item");
+        if (!winnerItems.length) return;
 
-        /*
-           Find all winner items from the browser card.
-        */
+        const bgDataUrl = await cropBackgroundToDataURL("/images/lcc_bg.png", 1200, 900);
+        const exportCard = buildExportCardBase(bgDataUrl);
 
-        const winnerItems =
-            element.querySelectorAll(
-                ".winner-item"
-            );
+        exportCard.appendChild(buildExportHeader({ programCourse, campusName, electionType, rightLogo }));
 
+        /* CONTENT — winner grid, padded below the full-width ribbon */
+        const content = document.createElement("div");
+        content.style.flex = "1";
+        content.style.minHeight = "0";
+        content.style.padding = "26px 55px 0";
+        content.style.display = "flex";
+        content.style.flexDirection = "column";
 
-        if (!winnerItems.length) {
-            return;
+        const items = [...winnerItems];
+        const isPresident = item =>
+            item.querySelector(".winner-item-info span")?.textContent.trim().toLowerCase() === "president";
+
+        const presidentItem = items.find(isPresident) || null;
+        const otherItems = items.filter(item => item !== presidentItem);
+
+        const rows = [];
+        if (presidentItem) rows.push([presidentItem]);
+        for (let i = 0; i < otherItems.length; i += 3) {
+            rows.push(otherItems.slice(i, i + 3));
         }
 
-
-        /*
-           Create a completely separate
-           export-only container.
-        */
-
-        const exportCard =
-            document.createElement("div");
-
-
-        exportCard.style.position = "fixed";
-        exportCard.style.left = "-10000px";
-        exportCard.style.top = "0";
-
-        exportCard.style.width = "1200px";
-        exportCard.style.height = "900px";
-
-        exportCard.style.boxSizing = "border-box";
-
-        exportCard.style.background = "#FFFFFF";
-
-        exportCard.style.padding = "55px 60px";
-
-        exportCard.style.fontFamily =
-            "Arial, Helvetica, sans-serif";
-
-        exportCard.style.color = "#202334";
-
-        exportCard.style.overflow = "hidden";
-
-
-        /*
-           HEADER
-        */
-
-        const header =
-            document.createElement("div");
-
-
-        header.style.textAlign = "center";
-
-        header.style.marginBottom = "35px";
-
-
-        const smallTitle =
-            document.createElement("div");
-
-
-        smallTitle.textContent =
-            "OFFICIAL ELECTION RESULTS";
-
-
-        smallTitle.style.fontSize = "14px";
-
-        smallTitle.style.fontWeight = "700";
-
-        smallTitle.style.letterSpacing = "2px";
-
-        smallTitle.style.textTransform =
-            "uppercase";
-
-
-        smallTitle.style.marginBottom = "8px";
-
-
-        const mainTitle =
-            document.createElement("div");
-
-
-        mainTitle.textContent =
-            `${title} Winners`;
-
-
-        mainTitle.style.fontSize = "38px";
-
-        mainTitle.style.fontWeight = "800";
-
-        mainTitle.style.lineHeight = "1.1";
-
-
-        const subtitleElement =
-            document.createElement("div");
-
-
-        subtitleElement.textContent =
-            `${campusName} Campus • ${subtitle}`;
-
-
-        subtitleElement.style.marginTop = "8px";
-
-        subtitleElement.style.fontSize = "15px";
-
-        subtitleElement.style.color = "#6B7280";
-
-
-        header.appendChild(
-            smallTitle
-        );
-
-        header.appendChild(
-            mainTitle
-        );
-
-        header.appendChild(
-            subtitleElement
-        );
-
-
-        exportCard.appendChild(
-            header
-        );
-
-
-        /*
-           WINNER GRID
-           
-           5 winners per row.
-        */
-
-        const grid =
-            document.createElement("div");
-
-
-        grid.style.display = "grid";
-
-        grid.style.gridTemplateColumns =
-            "repeat(5, 1fr)";
-
-        grid.style.gridTemplateRows =
-            "repeat(2, 1fr)";
-
-        grid.style.gap = "18px";
-
-
-        grid.style.height = "625px";
-
-
-        winnerItems.forEach(
-            item => {
-
-                const image =
-                    item.querySelector("img");
-
-
-                const position =
-                    item.querySelector(
-                        ".winner-item-info span"
-                    );
-
-
-                const name =
-                    item.querySelector(
-                        ".winner-item-info strong"
-                    );
-
-
-                /*
-                   Partylist may not exist yet.
-                */
-
-                const originalCandidate =
-                    findCandidateByName(
-                        name?.textContent || ""
-                    );
-
-
-                const partylist =
-                    originalCandidate?.partylist ||
-                    "Independent";
-
-
-                /*
-                   Winner box
-                */
-
-                const winnerBox =
-                    document.createElement("div");
-
-
-                winnerBox.style.boxSizing =
-                    "border-box";
-
-
-                winnerBox.style.padding =
-                    "20px 15px";
-
-
-                winnerBox.style.border =
-                    "1px solid #E5E7EB";
-
-
-                winnerBox.style.borderRadius =
-                    "18px";
-
-
-                winnerBox.style.background =
-                    "#F9FAFB";
-
-
-                winnerBox.style.display =
-                    "flex";
-
-
-                winnerBox.style.flexDirection =
-                    "column";
-
-
-                winnerBox.style.alignItems =
-                    "center";
-
-
-                winnerBox.style.justifyContent =
-                    "center";
-
-
-                winnerBox.style.textAlign =
-                    "center";
-
-
-                /*
-                   Candidate image
-                */
-
-                const candidateImage =
-                    document.createElement("img");
-
-
-                candidateImage.src =
-                    image?.src ||
-                    DEFAULT_CANDIDATE_IMAGE
-
-
-                candidateImage.style.width =
-                    "115px";
-
-
-                candidateImage.style.height =
-                    "115px";
-
-
-                candidateImage.style.borderRadius =
-                    "16px";
-
-
-                candidateImage.style.objectFit =
-                    "cover";
-
-
-                candidateImage.style.border =
-                    "2px solid #E1E4EC";
-
-
-                candidateImage.style.background =
-                    "#F0F2F7";
-
-
-                candidateImage.style.marginBottom =
-                    "15px";
-
-
-                candidateImage.onerror =
-                    () => {
-
-                        candidateImage.src =
-                            DEFAULT_CANDIDATE_IMAGE
-
-                    };
-
-
-                /*
-                   Candidate name
-                */
-
-                const candidateName =
-                    document.createElement("div");
-
-
-                candidateName.textContent =
-                    name?.textContent ||
-                    "Unknown Candidate";
-
-
-                candidateName.style.fontSize =
-                    "17px";
-
-
-                candidateName.style.fontWeight =
-                    "800";
-
-
-                candidateName.style.lineHeight =
-                    "1.2";
-
-
-                candidateName.style.maxWidth =
-                    "190px";
-
-
-                candidateName.style.marginBottom =
-                    "8px";
-
-
-                /*
-                   Position
-                */
-
-                const candidatePosition =
-                    document.createElement("div");
-
-
-                candidatePosition.textContent =
-                    position?.textContent ||
-                    "";
-
-
-                candidatePosition.style.fontSize =
-                    "11px";
-
-
-                candidatePosition.style.fontWeight =
-                    "700";
-
-
-                candidatePosition.style.textTransform =
-                    "uppercase";
-
-
-                candidatePosition.style.letterSpacing =
-                    "1px";
-
-
-                candidatePosition.style.marginBottom =
-                    "5px";
-
-
-                /*
-                   Partylist
-                */
-
-                const candidatePartylist =
-                    document.createElement("div");
-
-
-                candidatePartylist.textContent =
-                    partylist;
-
-
-                candidatePartylist.style.fontSize =
-                    "12px";
-
-
-                candidatePartylist.style.color =
-                    "#6B7280";
-
-
-                candidatePartylist.style.lineHeight =
-                    "1.3";
-
-
-                candidatePartylist.style.maxWidth =
-                    "190px";
-
-
-                winnerBox.appendChild(
-                    candidateImage
-                );
-
-
-                winnerBox.appendChild(
-                    candidateName
-                );
-
-
-                winnerBox.appendChild(
-                    candidatePosition
-                );
-
-
-                winnerBox.appendChild(
-                    candidatePartylist
-                );
-
-
-                grid.appendChild(
-                    winnerBox
-                );
-
+        const imageSize = rows.length <= 3 ? 74 : 54;
+
+        const layout = document.createElement("div");
+        layout.style.display = "flex";
+        layout.style.flexDirection = "column";
+        layout.style.gap = "16px";
+        layout.style.flex = "1";
+        layout.style.minHeight = "0";
+
+        rows.forEach(rowItems => {
+            const row = document.createElement("div");
+            row.style.flex = "1";
+            row.style.minHeight = "0";
+            row.style.gap = "16px";
+
+            const isPartialRow = rowItems.length < 3;
+            if (isPartialRow) {
+                row.style.display = "flex";
+                row.style.justifyContent = "center";
+            } else {
+                row.style.display = "grid";
+                row.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))";
             }
-        );
 
+            rowItems.forEach(item => {
+                const box = createExportWinnerBox(item, imageSize, positions, isRepresentative);  // CHANGED
+                if (isPartialRow) box.style.width = "calc((100% - 32px) / 3)";
+                row.appendChild(box);
+            });
 
-        exportCard.appendChild(
-            grid
-        );
+            layout.appendChild(row);
+        });
 
+        content.appendChild(layout);
+        exportCard.appendChild(content);
+        exportCard.appendChild(buildExportFooter());
 
-        /*
-           FOOTER
-        */
+        document.body.appendChild(exportCard);
 
-        const footer =
-            document.createElement("div");
+        const canvas = await html2canvas(exportCard, {
+            backgroundColor: "#FFFFFF",
+            scale: 2,
+            useCORS: true,
+            width: 1200,
+            height: 900
+        });
 
+        document.body.removeChild(exportCard);
 
-        footer.textContent =
-            "LCCast • Official Election Results";
-
-
-        footer.style.textAlign =
-            "center";
-
-
-        footer.style.marginTop =
-            "20px";
-
-
-        footer.style.fontSize =
-            "11px";
-
-
-        footer.style.color =
-            "#9CA3AF";
-
-
-        exportCard.appendChild(
-            footer
-        );
-
-
-        document.body.appendChild(
-            exportCard
-        );
-
-
-        /*
-           Render the dedicated export design.
-        */
-
-        const canvas =
-            await html2canvas(
-                exportCard,
-                {
-                    backgroundColor: "#FFFFFF",
-                    scale: 2,
-                    useCORS: true,
-                    width: 1200,
-                    height: 900
-                }
-            );
-
-
-        document.body.removeChild(
-            exportCard
-        );
-
-
-        /*
-           Final output is exactly 4:3.
-        */
-
-        const outputCanvas =
-            document.createElement("canvas");
-
-
+        const outputCanvas = document.createElement("canvas");
         outputCanvas.width = 1200;
-
         outputCanvas.height = 900;
+        outputCanvas.getContext("2d").drawImage(canvas, 0, 0, 1200, 900);
 
-
-        const context =
-            outputCanvas.getContext("2d");
-
-
-        context.drawImage(
-            canvas,
-            0,
-            0,
-            1200,
-            900
-        );
-
-
-        /*
-           Download.
-        */
-
-        const link =
-            document.createElement("a");
-
-
-        link.download =
-            `${campusName}-winners.png`
-                .replace(/\s+/g, "-")
-                .toLowerCase();
-
-
-        link.href =
-            outputCanvas.toDataURL(
-                "image/png"
-            );
-
-
+        const link = document.createElement("a");
+        link.download = `${campusName}-winners.png`.replace(/\s+/g, "-").toLowerCase();
+        link.href = outputCanvas.toDataURL("image/png");
         link.click();
 
-
     } catch (error) {
-
-        console.error(
-            "Winner card download failed:",
-            error
-        );
-
+        console.error("Winner card download failed:", error);
     }
-
 }
 
 /* =========================================================
    BUILD DESIGNED POSITION EXPORT
 ========================================================= */
 
-function buildPositionWinnerExportCard(
-    positionName,
-    candidates,
-    campusName,
-    electionStatus
-) {
-
-    const orderedCandidates =
-        [...candidates].sort(
-            (a, b) =>
-                Number(b.votes || 0) -
-                Number(a.votes || 0)
-        );
-
-
-    const totalVotes =
-        orderedCandidates.reduce(
-            (total, candidate) =>
-                total +
-                Number(candidate.votes || 0),
-            0
-        );
-
-
-    const exportCard =
-        document.createElement("div");
-
-
-    exportCard.className =
-        "position-winner-export-card";
-
-
-    exportCard.innerHTML = `
-
-        <!-- ============================================
-             BACKGROUND
-        ============================================= -->
-
-        <div class="position-export-decoration decoration-one"></div>
-
-        <div class="position-export-decoration decoration-two"></div>
-
-
-        <!-- ============================================
-             HEADER
-        ============================================= -->
-
-        <div class="position-export-header">
-
-            <div>
-
-                <span class="position-export-brand">
-                    LCCAST
-                </span>
-
-
-                <span class="position-export-type">
-                    OFFICIAL ELECTION RESULT
-                </span>
-
-            </div>
-
-
-            <span class="position-export-status">
-
-                ${electionStatus === "concluded"
-
-            ? "CONCLUDED"
-
-            : electionStatus.toUpperCase()
-        }
-
-            </span>
-
-        </div>
-
-
-        <!-- ============================================
-             POSITION
-        ============================================= -->
-
-        <div class="position-export-position">
-
-            <span>
-                POSITION
-            </span>
-
-
-            <h1>
-                ${escapeHTML(positionName)}
-            </h1>
-
-        </div>
-
-
-        <!-- ============================================
-             CANDIDATES
-        ============================================= -->
-
-        <div class="position-export-candidates">
-
-            ${orderedCandidates.map(
-            (candidate, index) => {
-
-                const votes =
-                    Number(
-                        candidate.votes || 0
-                    );
-
-
-                const percentage =
-                    totalVotes > 0
-
-                        ? (
-                            votes /
-                            totalVotes
-                        ) * 100
-
-                        : 0;
-
-
-                return `
-
-                            <div
-                                class="
-                                    position-export-candidate
-                                    ${index === 0
-
-                        ? "is-leading"
-
-                        : ""
-                    }
-                                "
-                            >
-
-                                ${index === 0
-
-                        ? `
-
-                                            <div
-                                                class="
-                                                    position-export-leading-label
-                                                "
-                                            >
-
-                                                <i
-                                                    class="
-                                                        bi
-                                                        bi-trophy-fill
-                                                    "
-                                                ></i>
-
-                                                ${electionStatus ===
-                            "concluded"
-
-                            ? "OFFICIAL WINNER"
-
-                            : "LEADING CANDIDATE"
-                        }
-
-                                            </div>
-
-                                        `
-
-                        : ""
-                    }
-
-
-                                <div
-                                    class="
-                                        position-export-candidate-photo
-                                    "
-                                >
-
-                                    <img
-                                        src="${resolveCandidateImage(candidate.photo)}"
-                                        alt="${escapeHTML(candidate.name || "Candidate")}"
-                                    ></img>
-
-                                </div>
-
-
-                                <div
-                                    class="
-                                        position-export-candidate-info
-                                    "
-                                >
-
-                                    <h2>
-
-                                        ${escapeHTML(
-                        candidate.name ||
-                        "Unknown Candidate"
-                    )
-                    }
-
-                                    </h2>
-
-
-                                    <p>
-
-                                        ${escapeHTML(
-                        candidate.partylist ||
-                        "Independent"
-                    )
-                    }
-
-                                    </p>
-
-
-                                    <div
-                                        class="
-                                            position-export-candidate-stats
-                                        "
-                                    >
-
-                                        <div>
-
-                                            <strong>
-                                                ${votes.toLocaleString()}
-                                            </strong>
-
-                                            <span>
-                                                VOTES
-                                            </span>
-
-                                        </div>
-
-
-                                        <div>
-
-                                            <strong>
-                                                ${percentage.toFixed(1)}%
-                                            </strong>
-
-                                            <span>
-                                                VOTE SHARE
-                                            </span>
-
-                                        </div>
-
-                                    </div>
-
-                                </div>
-
-                            </div>
-
-                        `;
-
-            }
-        ).join("")
-
-        }
-
-        </div>
-
-
-        <!-- ============================================
-             FOOTER
-        ============================================= -->
-
-        <div class="position-export-footer">
-
-            <span>
-                ${escapeHTML(campusName)}
-            </span>
-
-
-            <span>
-                LCCAST • ELECTION RESULTS
-            </span>
-
-        </div>
-
+function createExportPositionCandidateRow(candidate, index, totalVotes) {
+    const votes = Number(candidate.votes || 0);
+    const percentage = totalVotes > 0 ? (votes / totalVotes) * 100 : 0;
+
+    const row = document.createElement("div");
+    row.style.position = "relative";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "20px";
+    row.style.padding = "16px 22px";
+    row.style.borderRadius = "18px";
+    row.style.border = index === 0 ? "2px solid #5B5CEB" : "1px solid #E5E7EF";
+    row.style.background = index === 0 ? "#FAFAFF" : "#FFFFFF";
+
+    if (index === 0) {
+        const badge = document.createElement("div");
+        badge.textContent = "★ OFFICIAL WINNER";
+        badge.style.position = "absolute";
+        badge.style.top = "-11px";
+        badge.style.right = "18px";
+        badge.style.background = "#5B5CEB";
+        badge.style.color = "#FFFFFF";
+        badge.style.fontSize = "10px";
+        badge.style.fontWeight = "800";
+        badge.style.letterSpacing = ".6px";
+        badge.style.padding = "4px 10px";
+        badge.style.borderRadius = "999px";
+        row.appendChild(badge);
+    }
+
+    const img = document.createElement("img");
+    img.src = resolveCandidateImage(candidate.photo);
+    img.onerror = () => { img.src = DEFAULT_CANDIDATE_IMAGE; };
+    img.style.width = "82px";
+    img.style.height = "82px";
+    img.style.borderRadius = "14px";
+    img.style.objectFit = "cover";
+    img.style.border = "2px solid #E1E4EC";
+    img.style.flexShrink = "0";
+
+    const info = document.createElement("div");
+    info.style.flex = "1";
+    info.style.minWidth = "0";
+
+    const name = document.createElement("div");
+    name.textContent = candidate.name || "Unknown Candidate";
+    name.style.fontSize = "19px";
+    name.style.fontWeight = "800";
+    name.style.color = "#202334";
+    name.style.whiteSpace = "nowrap";
+    name.style.overflow = "hidden";
+    name.style.textOverflow = "ellipsis";
+
+    const group = document.createElement("div");
+    group.textContent = candidate.partylist || "Independent";
+    group.style.marginTop = "3px";
+    group.style.fontSize = "13px";
+    group.style.color = "#6B7280";
+
+    const stats = document.createElement("div");
+    stats.style.marginTop = "9px";
+    stats.style.display = "flex";
+    stats.style.gap = "26px";
+    stats.innerHTML = `
+        <div><strong style="font-size:16px;color:#202334;">${votes.toLocaleString()}</strong>
+             <span style="display:block;font-size:9px;color:#9AA0AE;font-weight:700;letter-spacing:.5px;">VOTES</span></div>
+        <div><strong style="font-size:16px;color:#202334;">${percentage.toFixed(1)}%</strong>
+             <span style="display:block;font-size:9px;color:#9AA0AE;font-weight:700;letter-spacing:.5px;">VOTE SHARE</span></div>
     `;
 
+    info.appendChild(name);
+    info.appendChild(group);
+    info.appendChild(stats);
+    row.appendChild(img);
+    row.appendChild(info);
 
-    exportCard
-        .querySelectorAll("img")
-        .forEach(
-            image => {
-
-                image.onerror = () => {
-
-                    image.src =
-                        DEFAULT_CANDIDATE_IMAGE
-
-                };
-
-            }
-        );
-
-
-    return exportCard;
-
+    return row;
 }
 
+async function downloadPositionWinnerCard(positionName, prefix, candidates, options = {}) {
+    if (typeof html2canvas === "undefined") return;
+    if (!candidates || !candidates.length) return;
+
+    try {
+        const exportCard = await buildPositionWinnerExportCard(positionName, candidates, options);
+        exportCard.style.position = "fixed";
+        exportCard.style.left = "-100000px";
+        exportCard.style.top = "0";
+
+        document.body.appendChild(exportCard);
+
+        const canvas = await html2canvas(exportCard, {
+            backgroundColor: "#FFFFFF",
+            scale: 2,
+            useCORS: true,
+            width: 1200,
+            height: 900
+        });
+
+        document.body.removeChild(exportCard);
+
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width = 1200;
+        outputCanvas.height = 900;
+        outputCanvas.getContext("2d").drawImage(canvas, 0, 0, 1200, 900);
+
+        const link = document.createElement("a");
+        link.download = `${prefix}-${positionName}-result.png`.replace(/\s+/g, "-").toLowerCase();
+        link.href = outputCanvas.toDataURL("image/png");
+        link.click();
+    } catch (error) {
+        console.error("Position winner export failed:", error);
+    }
+}
 
 /* =========================================================
    DOWNLOAD DESIGNED POSITION WINNER PNG
 ========================================================= */
-
-async function downloadPositionWinnerCard(
-    element,
-    positionName,
-    prefix,
-    candidates
-) {
-
-    if (
-        !element ||
-        typeof html2canvas === "undefined"
-    ) {
-        return;
-    }
-
-
-    /*
-       Always use the actual ordered
-       candidate data passed from
-       renderPositionWinnerCards().
-    */
-
-    if (
-        !candidates ||
-        !candidates.length
-    ) {
-        return;
-    }
-
-
-    const parent =
-        element.closest(
-            ".result-entity-container"
-        );
-
-
-    const campusName =
-
-        parent?.querySelector(
-            ".department-campus-label"
-        )?.textContent
-            ?.replace(
-                /Campus/i,
-                ""
-            )
-            .trim()
-
-        ||
-
-        parent?.querySelector(
-            ".result-entity-title-row h2"
-        )?.textContent
-            ?.trim()
-
-        ||
-
-        "Campus";
-
-
-    const exportCard =
-        buildPositionWinnerExportCard(
-
-            positionName,
-
-            candidates,
-
-            campusName,
-
-            "concluded"
-
-        );
-
-
-    exportCard.style.position =
-        "fixed";
-
-
-    exportCard.style.left =
-        "-100000px";
-
-
-    exportCard.style.top =
-        "0";
-
-
-    document.body.appendChild(
-        exportCard
-    );
-
-
-    try {
-
-        const canvas =
-            await html2canvas(
-
-                exportCard,
-
-                {
-
-                    width: 1200,
-
-                    height: 900,
-
-                    scale: 1,
-
-                    backgroundColor: "#FFFFFF",
-
-                    useCORS: true
-
-                }
-
-            );
-
-
-        const link =
-            document.createElement("a");
-
-
-        link.download =
-
-            `${prefix}-${positionName}-result.png`
-
-                .replace(
-                    /\s+/g,
-                    "-"
-                )
-
-                .toLowerCase();
-
-
-        link.href =
-            canvas.toDataURL(
-                "image/png"
-            );
-
-
-        link.click();
-
-    } catch (error) {
-
-        console.error(
-
-            "Position winner export failed:",
-
-            error
-
-        );
-
-    } finally {
-
-        exportCard.remove();
-
-    }
-
-}
 
 /* =========================================================
    FIND CANDIDATE BY NAME

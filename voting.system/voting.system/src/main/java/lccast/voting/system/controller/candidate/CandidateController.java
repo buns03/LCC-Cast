@@ -2,6 +2,8 @@ package lccast.voting.system.controller.candidate;
 
 import jakarta.servlet.http.HttpSession;
 import lccast.voting.system.service.CandidatePortalService;
+import lccast.voting.system.service.CandidatePortalService.CandidateRecord;
+import lccast.voting.system.service.CandidatePortalService.CandidateType;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,16 +44,17 @@ public class CandidateController {
         model.addAttribute("role", role);
 
         String authUserIdStr = (String) session.getAttribute("userId");
-        String avatarUrl = null;
+        model.addAttribute("avatarUrl", resolveAvatarUrl(authUserIdStr));
+    }
 
-        if (authUserIdStr != null) {
-            var record = candidatePortalService.findRecordByAuthUserId(UUID.fromString(authUserIdStr));
-            if (record != null && record.photoImageUrl != null) {
-                avatarUrl = "/api/storage/file?path=" +
-                        URLEncoder.encode(record.photoImageUrl, StandardCharsets.UTF_8);
-            }
+    private String resolveAvatarUrl(String authUserIdStr) {
+        if (authUserIdStr == null) {
+            return null;
         }
-
-        model.addAttribute("avatarUrl", avatarUrl);
+        String storagePath = candidatePortalService.findAvatarStoragePath(UUID.fromString(authUserIdStr));
+        if (storagePath == null) {
+            return null;
+        }
+        return "/api/storage/file?path=" + URLEncoder.encode(storagePath, StandardCharsets.UTF_8);
     }
 }

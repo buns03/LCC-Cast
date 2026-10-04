@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lccast.voting.system.model.*;
 import lccast.voting.system.repository.*;
 import lccast.voting.system.service.AuditLogService;
+import lccast.voting.system.service.DrawDetectionService;
 import lccast.voting.system.service.SupabaseStorageService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -15,6 +16,9 @@ import org.thymeleaf.context.Context;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import lccast.voting.system.repository.BallotVoteRepository;
+import lccast.voting.system.repository.PartylistMemberRepository;
+import lccast.voting.system.repository.DepartmentMemberRepository;
 
 import jakarta.mail.internet.MimeMessage;
 import java.time.Instant;
@@ -41,6 +45,9 @@ public class ElectionEmailService {
     private final PartylistRepository partylistRepository;
     private final CandidateRepository candidateRepository;
     private final SupabaseStorageService supabaseStorageService;
+    private final BallotVoteRepository ballotVoteRepository;
+    private final DrawDetectionService drawDetectionService;
+
 
     @Value("${lccast.mail.from}")
     private String fromAddress;
@@ -50,6 +57,9 @@ public class ElectionEmailService {
 
     @Value("${lccast.app.login-url}")
     private String loginUrl;
+
+    @Value("${lccast.app.base-url}")
+    private String baseUrl;
 
     public ElectionEmailService(
             ElectionService electionService,
@@ -65,7 +75,9 @@ public class ElectionEmailService {
             AuditLogService auditLogService,
             PartylistRepository partylistRepository,
             CandidateRepository candidateRepository,
-            SupabaseStorageService supabaseStorageService
+            SupabaseStorageService supabaseStorageService,
+            BallotVoteRepository ballotVoteRepository,
+            DrawDetectionService drawDetectionService
     ) {
         this.electionService = electionService;
         this.electionDepartmentRepository = electionDepartmentRepository;
@@ -81,6 +93,8 @@ public class ElectionEmailService {
         this.partylistRepository = partylistRepository;
         this.candidateRepository = candidateRepository;
         this.supabaseStorageService = supabaseStorageService;
+        this.ballotVoteRepository = ballotVoteRepository;
+        this.drawDetectionService = drawDetectionService;
     }
 
     /* ======================================================
@@ -160,6 +174,17 @@ public class ElectionEmailService {
     private static final DateTimeFormatter DATE_FMT =
             DateTimeFormatter.ofPattern("MMMM d, yyyy 'at' h:mm a").withZone(ZoneId.systemDefault());
 
+    private String formatDate(Instant value) {
+        return value == null ? "To be announced" : DATE_FMT.format(value);
+    }
+
+    private void assertHasSchedule(Election election) {
+        if (election.getStartAt() == null || election.getEndAt() == null) {
+            throw new IllegalStateException(
+                    "Set the voting schedule for this draw election before sending the announcement email.");
+        }
+    }
+
     private Context buildEmailContext(Election election) {
         Context ctx = new Context();
 
@@ -176,9 +201,13 @@ public class ElectionEmailService {
                 ? "This election has not started yet. Mark your calendar and log in to LCC Cast once voting opens to cast your vote."
                 : "Voting for this election is now open. Log in to LCC Cast to view the candidates or program information and cast your vote before it closes.";
 
+        if (election.isDrawElection()) {
+            description = "This is a tie-break election for positions that ended in a draw. " + description;
+        }
+
         ctx.setVariable("description", description);
-        ctx.setVariable("startAt", DATE_FMT.format(election.getStartAt()));
-        ctx.setVariable("endAt", DATE_FMT.format(election.getEndAt()));
+        ctx.setVariable("startAt", formatDate(election.getStartAt()));
+        ctx.setVariable("endAt", formatDate(election.getEndAt()));
         ctx.setVariable("loginUrl", loginUrl);
 
         boolean isSSC = election.getCategory() == ElectionCategory.SSC;
@@ -338,6 +367,7 @@ public class ElectionEmailService {
     @Transactional
     public ElectionEmailCampaign sendNow(UUID electionId, UUID adminId, HttpServletRequest request) {
         Election election = electionService.getById(electionId);
+        assertHasSchedule(election);
         List<Voter> recipients = getEligibleVoters(election);
 
         String html = renderHtml(election);
@@ -387,6 +417,7 @@ public class ElectionEmailService {
                 });
 
         Election election = electionService.getById(electionId);
+        assertHasSchedule(election);
         String html = renderHtml(election);
         String subject = buildSubject(election);
 
@@ -488,5 +519,252 @@ public class ElectionEmailService {
 
             recipientRepository.save(recipient);
         }
+    }
+
+    /* ======================================================
+   WINNER ANNOUNCEMENT
+====================================================== */
+
+    private record WinnerRow(String position, String name, String group, String photo, long votes) {}
+
+    private static final List<String> DEFAULT_REPRESENTATIVE_POSITIONS = List.of(
+            "President", "Vice President", "Secretary", "Treasurer",
+            "Auditor", "PRO Internal", "PRO External");
+
+    private List<WinnerRow> computeWinners(Election election) {
+        List<Candidate> candidates = candidateRepository.findByElectionId(election.getId());
+
+        if (candidates.isEmpty()) {
+            log.warn("No candidates found for electionId={} — winner email will have no winners.", election.getId());
+            return List.of();
+        }
+
+        Map<UUID, Long> votesByCandidateId = new HashMap<>();
+        for (Object[] row : ballotVoteRepository.countVotesByCandidateForElection(election.getId())) {
+            votesByCandidateId.put((UUID) row[0], (Long) row[1]);
+        }
+
+        boolean isSSC = election.getCategory() == ElectionCategory.SSC;
+        Department department = null;
+
+        if (!isSSC) {
+            List<Department> departments = electionDepartmentRepository
+                    .findByElectionId(election.getId())
+                    .stream()
+                    .map(ElectionDepartment::getDepartment)
+                    .toList();
+            department = departments.isEmpty() ? null : departments.get(0);
+        }
+
+        boolean isRepresentative = department != null && department.getVotingType() == VotingType.REPRESENTATIVE;
+
+        DrawDetectionService.DrawOutcome outcome = drawDetectionService.detect(election);
+
+        return isRepresentative
+                ? computeRepresentativeWinners(election, department, candidates, outcome)
+                : computePositionalWinners(election, candidates, votesByCandidateId, outcome);
+    }
+
+    /** SSC and Department‑Partylist: one winner per distinct declared position. */
+    private List<WinnerRow> computePositionalWinners(
+            Election election, List<Candidate> candidates, Map<UUID, Long> votesByCandidateId,
+            DrawDetectionService.DrawOutcome outcome) {
+
+        Set<String> drawPositions = outcome.positions().stream()
+                .map(String::trim).collect(Collectors.toSet());
+
+        Map<String, List<Candidate>> byPosition = candidates.stream()
+                .collect(Collectors.groupingBy(
+                        c -> (c.getPosition() == null || c.getPosition().isBlank())
+                                ? "Unassigned" : c.getPosition().trim(),
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+
+        List<WinnerRow> winners = new ArrayList<>();
+        for (Map.Entry<String, List<Candidate>> entry : byPosition.entrySet()) {
+            if (drawPositions.contains(entry.getKey())) continue;   // draw: no official winner yet
+
+            Candidate top = null;
+            long topVotes = -1;
+            for (Candidate c : entry.getValue()) {
+                long votes = votesByCandidateId.getOrDefault(c.getId(), 0L);
+                if (votes > topVotes) { topVotes = votes; top = c; }
+            }
+            if (top == null) continue;
+
+            String group = election.getCategory() == ElectionCategory.SSC
+                    ? resolvePartylistName(top) : resolveDepartmentGroupName(top);
+
+            winners.add(new WinnerRow(entry.getKey(), candidateFullName(top), group,
+                    resolveCandidatePhotoUrl(top), topVotes));
+        }
+        return winners;
+    }
+
+
+    /** Department‑Representative: no declared positions — rank everyone by votes
+     *  and assign the department's position list in order (1st = President, etc). */
+    private List<WinnerRow> computeRepresentativeWinners(
+            Election election, Department department, List<Candidate> candidates,
+            DrawDetectionService.DrawOutcome outcome) {
+
+        Map<UUID, Candidate> candidateById = candidates.stream()
+                .collect(Collectors.toMap(Candidate::getId, c -> c));
+
+        // position -> candidateId -> votes (only used to show the winner's vote count)
+        Map<String, Map<UUID, Long>> tallyByPosition = new LinkedHashMap<>();
+        for (Object[] row : ballotVoteRepository.countVotesByCandidateAndPositionForElectionAndDepartment(
+                election.getId(), department.getId())) {
+
+            UUID candidateId = (UUID) row[0];
+            String position = (String) row[1];
+            Long count = (Long) row[2];
+
+            if (position == null || position.isBlank()) continue;
+            if (!candidateById.containsKey(candidateId)) continue;
+
+            tallyByPosition.computeIfAbsent(position, k -> new HashMap<>())
+                    .merge(candidateId, count, Long::sum);
+        }
+
+        List<String> positionOrder = drawDetectionService.openPositions(election, department);
+        if (positionOrder.isEmpty()) positionOrder = DEFAULT_REPRESENTATIVE_POSITIONS;
+
+        String group = resolveDepartmentGroupName(candidates.get(0));
+        List<WinnerRow> winners = new ArrayList<>();
+
+        for (String position : positionOrder) {
+            if (outcome.tiedByPosition().containsKey(position)) continue;   // draw: no official winner yet
+
+            UUID winnerId = outcome.winnersByPosition().get(position);
+            Candidate top = winnerId == null ? null : candidateById.get(winnerId);
+            if (top == null) continue;
+
+            long votes = tallyByPosition.getOrDefault(position, Map.of()).getOrDefault(winnerId, 0L);
+            winners.add(new WinnerRow(position, candidateFullName(top), group,
+                    resolveCandidatePhotoUrl(top), votes));
+        }
+        return winners;
+    }
+
+    private Context buildWinnerEmailContext(Election election) {
+        Context ctx = new Context();
+
+        String campusName = campusRepository.findById(election.getCampusId())
+                .map(Campus::getName).orElse("");
+
+        boolean isSSC = election.getCategory() == ElectionCategory.SSC;
+
+        String electionType = isSSC ? "Supreme Student Council" : "Departmental Election";
+
+        String programCourse = null;
+        if (!isSSC) {
+            List<Department> departments = electionDepartmentRepository
+                    .findByElectionId(election.getId())
+                    .stream()
+                    .map(ElectionDepartment::getDepartment)
+                    .toList();
+
+            Department dept = departments.isEmpty() ? null : departments.get(0);
+
+            programCourse = dept == null ? null : dept.getName();
+        }
+
+        String headerSubtitle = programCourse != null
+                ? programCourse + " - " + campusName + " - " + electionType
+                : campusName + " - " + electionType;
+
+        ctx.setVariable("headerSubtitle", headerSubtitle);
+        ctx.setVariable("logoUrl", baseUrl + "/images/lcccast_logo.png");
+        ctx.setVariable("electionTitle", election.getTitle());
+        ctx.setVariable("campus", campusName);
+        ctx.setVariable("schoolYear", election.getSchoolYear());
+        ctx.setVariable("loginUrl", loginUrl);
+
+
+        List<WinnerRow> winners = computeWinners(election);
+        List<Map<String, Object>> winnerMaps = winners.stream().map(w -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("position", w.position());
+            m.put("name", w.name());
+            m.put("group", w.group());
+            m.put("photo", w.photo());
+            m.put("votes", w.votes());
+            return m;
+        }).toList();
+
+        ctx.setVariable("winners", winnerMaps);
+        ctx.setVariable("drawPositions", new ArrayList<>(drawDetectionService.detect(election).positions()));
+
+        return ctx;
+    }
+
+
+    private String renderWinnerHtml(Election election) {
+        return templateEngine.process("email/election-winners", buildWinnerEmailContext(election));
+    }
+
+    private String buildWinnerSubject(Election election) {
+        return "[LCC Cast] Results: " + election.getTitle();
+    }
+
+    /**
+     * Sends the winner announcement to every voter eligible for this
+     * election — SSC elections reach only that campus, department
+     * elections reach only that campus + program combination, both
+     * via the existing getEligibleVoters() scoping.
+     *
+     * Idempotent: a WINNERS campaign is only sent once per election.
+     */
+    @Transactional
+    public ElectionEmailCampaign sendWinnerAnnouncement(UUID electionId, HttpServletRequest request) {
+        boolean alreadySent = campaignRepository.existsByElectionIdAndSendType(electionId, "WINNERS");
+
+        if (alreadySent) {
+            log.info("Winner announcement already sent for electionId={}, skipping.", electionId);
+            throw new IllegalStateException("Winner announcement already sent for this election.");
+        }
+
+        Election election = electionService.getById(electionId);
+        log.info("Building winner announcement — electionId={}, title={}", electionId, election.getTitle());
+
+        List<Voter> recipients = getEligibleVoters(election);
+        log.info("Winner announcement — {} eligible recipients for electionId={}", recipients.size(), electionId);
+
+        String html;
+        String subject;
+        try {
+            html = renderWinnerHtml(election);
+            subject = buildWinnerSubject(election);
+        } catch (Exception e) {
+            log.error("Failed to render winner email for electionId={}", electionId, e);
+            throw e;
+        }
+
+        ElectionEmailCampaign campaign = new ElectionEmailCampaign();
+        campaign.setElectionId(electionId);
+        campaign.setSubject(subject);
+        campaign.setBody(html);
+        campaign.setSendType("WINNERS");
+        campaign.setStatus("SENDING");
+        campaign = campaignRepository.save(campaign);
+
+        dispatch(campaign, recipients, html, subject);
+
+        campaign.setStatus("SENT");
+        campaign.setSentAt(Instant.now());
+        campaign = campaignRepository.save(campaign);
+
+        log.info("Winner announcement sent — electionId={}, recipients={}", electionId, recipients.size());
+
+        if (request != null) {
+            auditLogService.log(
+                    request, lccast.voting.system.model.AuditAction.UPDATE, "Elections", electionId,
+                    "sent winner announcement for: " + election.getTitle(),
+                    Map.of("recipients", recipients.size(), "sendType", "WINNERS")
+            );
+        }
+
+        return campaign;
     }
 }

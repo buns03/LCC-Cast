@@ -10,7 +10,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <title>LCCast | History</title>
+    <title>LCC Cast | History</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
 
     <!-- ======================================================
          GLOBAL STYLES
@@ -21,7 +25,7 @@
     <link rel="stylesheet" href="/css/components.css" />
     <link rel="stylesheet" href="/css/forms.css" />
     <link rel="stylesheet" href="/css/modal.css" />
-    <link rel="stylesheet" href="/css/skeleton.css" />
+    <link rel="stylesheet" href="/css/skeleton-loading.css" />
     <link rel="stylesheet" href="/css/navigation.css" />
 
     <!-- ======================================================
@@ -64,7 +68,7 @@ SIDEBAR
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-top">
         <div class="logo">
-          <img src="/images/lcccast_logo.png" alt="LCCast" />
+          <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
           <h2 >LCC Cast</h2>
         </div>
@@ -404,7 +408,7 @@ SIDEBAR
                     >
                       <option value="">All Campuses</option>
 
-                      <option value="62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8">College</option>
+                      <option value="62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8">Kaypian</option>
 
                       <option value="9bc86421-63ce-4a7e-94ae-fc1bc6328956">Muzon</option>
                     </select>
@@ -526,7 +530,7 @@ SIDEBAR
 
               <p>
                 Track account activity and administrative actions performed
-                within LCCast.
+                within LCC Cast.
               </p>
             </div>
 
@@ -555,51 +559,21 @@ SIDEBAR
             </div>
 
             <select
-              id="actionTypeFilter"
-              class="history-filter"
-              data-filter="action"
+                    id="actionTypeFilter"
+                    class="history-filter"
+                    data-filter="action"
             >
               <option value="">All Actions</option>
-
-              <option>Login</option>
-
-              <option>Logout</option>
-
-              <option>Password Changed</option>
-
-              <option>Account Created</option>
-
-              <option>Account Updated</option>
-
-              <option>Election Created</option>
-
-              <option>Election Updated</option>
-
-              <option>Election Deleted</option>
-
-              <option>Partylist Created</option>
-
-              <option>Partylist Updated</option>
-
-              <option>Department Created</option>
-
-              <option>Department Updated</option>
-
-              <option>Candidate Added</option>
-
-              <option>Candidate Updated</option>
-
-              <option>Candidate Deleted</option>
             </select>
 
             <select
-              id="actionRoleFilter"
-              class="history-filter"
-              data-filter="role"
+                    id="actionRoleFilter"
+                    class="history-filter"
+                    data-filter="role"
             >
               <option value="">All Roles</option>
 
-              <option>Student</option>
+              <option>Candidate</option>
 
               <option>Admin</option>
 
@@ -625,7 +599,6 @@ SIDEBAR
 
                   <th>Date & Time</th>
 
-                  <th>Details</th>
                 </tr>
               </thead>
 
@@ -1008,11 +981,11 @@ SIDEBAR
           <!-- DESCRIPTION -->
 
           <div class="archive-view-field">
-            <span class="archive-view-field-label"> Description </span>
+            <span class="archive-view-field-label"> Details </span>
 
-            <p class="archive-view-description" id="archiveViewDescription">
+            <div class="archive-view-description" id="archiveViewDescription">
               No description available.
-            </p>
+            </div>
           </div>
 
           <!-- METADATA -->
@@ -1179,7 +1152,7 @@ SIDEBAR
 
           <h2>Logout?</h2>
 
-          <p>Are you sure you want to logout from LCCast?</p>
+          <p>Are you sure you want to logout from LCC Cast?</p>
         </div>
 
         <div class="modal-footer">
@@ -1244,6 +1217,7 @@ SIDEBAR
     <!-- ==========================================================
      SCRIPTS
 ========================================================== -->
+    <script src="/js/superadmin/soft-cache.js"></script>
     <script src="/js/navigation.js"></script>
 
     <script src="/js/logout.js"></script>

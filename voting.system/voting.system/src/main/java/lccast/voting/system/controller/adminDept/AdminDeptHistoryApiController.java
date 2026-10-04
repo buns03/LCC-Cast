@@ -75,6 +75,13 @@ public class AdminDeptHistoryApiController {
     // ACTIONS
     // ==================================================
 
+    @GetMapping("/actions/filter-options")
+    public List<String> actionFilterOptions(HttpSession session) {
+        UUID userId = sessionUserId(session);
+        if (userId == null) return List.of();
+        return historyService.getActionFilterOptionsForUser(userId);
+    }
+
     @GetMapping("/actions")
     public PageResponse<AuditLogDTO> actions(
             HttpSession session,
@@ -104,6 +111,13 @@ public class AdminDeptHistoryApiController {
         if (userId == null) return new PageResponse<>(List.of(), 1, 1, 0);
 
         return historyService.getArchivesForAdminDept(userId, search, type, page);
+    }
+
+    @GetMapping("/archives/{id}/details")
+    public Map<String, Object> archiveDetails(@PathVariable UUID id, HttpSession session) {
+        UUID userId = sessionUserId(session);
+        if (userId == null) throw new IllegalArgumentException("Session expired. Please log in again.");
+        return historyService.getArchiveDetailsForAdminDept(id, userId);
     }
 
     @PostMapping("/archives/{id}/restore")

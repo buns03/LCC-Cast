@@ -2,13 +2,7 @@ async function loadEditCampusOptions(select) {
     if (!select) return;
 
     try {
-        const response = await fetch("/superadmin/api/partylists/campuses");
-
-        if (!response.ok) {
-            throw new Error("Failed to load campuses.");
-        }
-
-        const campuses = await response.json();
+        const campuses = await SoftCache.load("/superadmin/api/partylists/campuses", { ttl: 300000 });
         const currentCampusId = select.dataset.campusId || "";
 
         select.innerHTML = `

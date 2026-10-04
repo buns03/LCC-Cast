@@ -18,6 +18,12 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   });
 
+  wirePasswordStrengthFeedback({
+      passwordInputId: "newPassword",
+      feedbackId: "newPasswordStrength",
+      getButtons: () => [document.getElementById("saveVoterSettings")]
+    });
+
   // ===== PASSWORD VISIBILITY =====
   document.querySelectorAll(".password-toggle").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -65,9 +71,16 @@ document.addEventListener("DOMContentLoaded", function () {
       const newPass = document.getElementById("newPassword");
       const confirm = document.getElementById("confirmPassword");
 
-      if (current.value === "") { setFieldError(current, true); valid = false; } else setFieldError(current, false);
-      if (newPass.value === "") { setFieldError(newPass, true); valid = false; } else setFieldError(newPass, false);
-      if (confirm.value === "" || confirm.value !== newPass.value) { setFieldError(confirm, true); valid = false; } else setFieldError(confirm, false);
+            if (current.value === "") { setFieldError(current, true); valid = false; } else setFieldError(current, false);
+            if (newPass.value === "") {
+              setFieldError(newPass, true);
+              valid = false;
+            } else {
+              const feedback = getPasswordFeedback(newPass.value);
+              setFieldError(newPass, !feedback.valid);
+              if (!feedback.valid) valid = false;
+            }
+            if (confirm.value === "" || confirm.value !== newPass.value) { setFieldError(confirm, true); valid = false; } else setFieldError(confirm, false);
     }
 
     return valid;
@@ -117,11 +130,14 @@ document.addEventListener("DOMContentLoaded", function () {
   // ===== SAVE BUTTON -> CONFIRM MODAL =====
   const form = document.getElementById("voterProfileForm");
 
-  form.addEventListener("submit", function (e) {
-    e.preventDefault();
-    if (!validateForm()) return;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (!validateForm()) return;
 
-    const emailTouched = isSectionOpen("emailChangeFields") &&
+      const saveBtn = document.getElementById("saveVoterSettings");
+      if (saveBtn && saveBtn.disabled) return;
+
+      const emailTouched = isSectionOpen("emailChangeFields") &&
         document.getElementById("voterEmail").value.trim() !== "";
     const passwordTouched = isSectionOpen("passwordChangeFields") &&
         document.getElementById("currentPassword").value !== "";

@@ -4,12 +4,11 @@ import lccast.voting.system.dto.superadmin.ElectionResponse;
 import lccast.voting.system.model.*;
 import lccast.voting.system.repository.*;
 
-import lccast.voting.system.service.AnalyticsService;
+import lccast.voting.system.service.*;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import jakarta.servlet.http.HttpServletRequest;
-import lccast.voting.system.service.AuditLogService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -17,7 +16,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -38,6 +39,10 @@ public class ElectionService {
     private final DepartmentMemberRepository departmentMemberRepository;
     private final org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate;
     private final AnalyticsService analyticsService;
+    private final CandidateRoleSyncService candidateRoleSyncService;
+    private final ElectionSchoolYearGuard schoolYearGuard;
+    private final ElectionVoteSyncService voteSyncService;
+    private final RealtimeBroadcastService realtime;
 
     public ElectionService(
             ElectionRepository electionRepository,
@@ -54,7 +59,11 @@ public class ElectionService {
             CandidateRepository candidateRepository,
             DepartmentMemberRepository departmentMemberRepository,
             SimpMessagingTemplate messagingTemplate,
-            AnalyticsService analyticsService
+            AnalyticsService analyticsService,
+            CandidateRoleSyncService candidateRoleSyncService,
+            ElectionSchoolYearGuard schoolYearGuard,
+            ElectionVoteSyncService voteSyncService,
+            RealtimeBroadcastService realtime
     ) {
         this.electionRepository = electionRepository;
         this.electionPartylistRepository = electionPartylistRepository;
@@ -71,6 +80,10 @@ public class ElectionService {
         this.departmentMemberRepository = departmentMemberRepository;
         this.messagingTemplate = messagingTemplate;
         this.analyticsService = analyticsService;
+        this.candidateRoleSyncService = candidateRoleSyncService;
+        this.schoolYearGuard = schoolYearGuard;
+        this.voteSyncService = voteSyncService;
+        this.realtime = realtime;
     }
 
 
@@ -127,6 +140,8 @@ public class ElectionService {
                     "End date must be after start date."
             );
 
+        schoolYearGuard.assertAvailable(category, campusId, schoolYear, departmentIds, null);
+
         Election election = new Election();
 
         election.setTitle(title.trim());
@@ -167,6 +182,8 @@ public class ElectionService {
                         "SSC election requires at least one partylist."
                 );
             }
+
+            assertBalancedPartylistPositions(partylistIds);
 
             for (UUID partylistId : partylistIds) {
 
@@ -235,6 +252,10 @@ public class ElectionService {
                 );
             }
 
+            if (firstVotingType == VotingType.PARTYLIST) {
+                assertBalancedDepartmentPositions(departmentIds);
+            }
+
             for (UUID departmentId : departmentIds) {
 
                 VotingType votingType = getDepartmentVotingType(departmentId);
@@ -288,6 +309,8 @@ public class ElectionService {
             }
         }
 
+        realtime.electionsChanged(saved.getCampusId());
+
         return saved;
     }
 
@@ -305,6 +328,11 @@ public class ElectionService {
     ) {
 
         Election election = getById(id);
+
+        if (election.isDrawElection()) {
+            // Only the schedule is editable; candidates stay as generated.
+            return scheduleDrawElection(id, startAt, endAt, request);
+        }
 
         RecordStatus currentStatus = calculateElectionStatus(election);
 
@@ -353,6 +381,8 @@ public class ElectionService {
                     "End date must be after start date."
             );
 
+        schoolYearGuard.assertAvailable(category, campusId, schoolYear, departmentIds, id);
+
         election.setTitle(title.trim());
         election.setCategory(category);
         election.setCampusId(campusId);
@@ -378,6 +408,8 @@ public class ElectionService {
                         "SSC election requires at least one partylist."
                 );
             }
+
+            assertBalancedPartylistPositions(partylistIds);
 
             candidateRepository.deleteByElectionId(election.getId());
             candidateRepository.flush();
@@ -449,6 +481,10 @@ public class ElectionService {
                 throw new IllegalArgumentException(
                         "Representative voting allows only one department."
                 );
+            }
+
+            if (firstVotingType == VotingType.PARTYLIST) {
+                assertBalancedDepartmentPositions(departmentIds);
             }
 
             candidateRepository.deleteByElectionId(election.getId());
@@ -579,6 +615,8 @@ public class ElectionService {
             );
         }
 
+        realtime.electionsChanged(saved.getCampusId());
+
         return saved;
     }
 
@@ -633,6 +671,10 @@ public class ElectionService {
         response.setSchoolYear(election.getSchoolYear());
         response.setStartAt(election.getStartAt());
         response.setEndAt(election.getEndAt());
+        response.setParentElectionId(election.getParentElectionId());
+        response.setDrawElection(election.isDrawElection());
+        response.setDrawPositions(election.getDrawPositions());
+
         RecordStatus currentStatus = calculateElectionStatus(election);
 
         response.setStatus(currentStatus);
@@ -697,6 +739,10 @@ public class ElectionService {
             }
         }
 
+        List<String> candidateStudentIds = candidateRepository.findByElectionId(election.getId()).stream()
+                .map(Candidate::getStudentId)
+                .toList();
+
         ArchiveRecord archive = new ArchiveRecord();
 
         archive.setEntityType("Elections");
@@ -714,6 +760,10 @@ public class ElectionService {
 
         electionRepository.save(election);
 
+        voteSyncService.refreshVotersOfElection(election.getId());
+
+        candidateRoleSyncService.demoteAllIfNoLongerCandidate(candidateStudentIds);
+
         auditLogService.log(
                 request,
                 AuditAction.ARCHIVE,
@@ -725,6 +775,9 @@ public class ElectionService {
                         "entityType", "Elections"
                 )
         );
+
+        realtime.electionsChanged(election.getCampusId());
+        realtime.historyChanged("archives");
     }
 
     public void delete(
@@ -743,6 +796,10 @@ public class ElectionService {
             }
         }
 
+        List<String> candidateStudentIds = candidateRepository.findByElectionId(election.getId()).stream()
+                .map(Candidate::getStudentId)
+                .toList();
+
         TrashRecord trash = new TrashRecord();
 
         trash.setEntityType("Elections");
@@ -760,6 +817,10 @@ public class ElectionService {
 
         electionRepository.save(election);
 
+        voteSyncService.refreshVotersOfElection(election.getId());
+
+        candidateRoleSyncService.demoteAllIfNoLongerCandidate(candidateStudentIds);
+
         auditLogService.log(
                 request,
                 AuditAction.DELETE,
@@ -771,6 +832,9 @@ public class ElectionService {
                         "entityType", "Elections"
                 )
         );
+
+        realtime.electionsChanged(election.getCampusId());
+        realtime.historyChanged("trash");
     }
 
     private String electionToJson(Election election) {
@@ -789,6 +853,8 @@ public class ElectionService {
             data.put("createdBy", election.getCreatedBy());
             data.put("createdAt", election.getCreatedAt());
             data.put("updatedAt", election.getUpdatedAt());
+            data.put("parentElectionId", election.getParentElectionId());
+            data.put("drawPositions", election.getDrawPositions());
 
             data.put(
                     "partylistIds",
@@ -827,6 +893,7 @@ public class ElectionService {
     }
 
     public VoterElectionPhase calculateVoterPhase(Election election) {
+        if (election.getStartAt() == null || election.getEndAt() == null) return VoterElectionPhase.HIDDEN;  // NEW, must be first
         Instant now = Instant.now();
         Instant fiveDaysBefore = election.getStartAt().minus(java.time.Duration.ofDays(5));
 
@@ -846,6 +913,7 @@ public class ElectionService {
     }
 
     private RecordStatus calculateElectionStatus(Election election) {
+        if (election.getStartAt() == null || election.getEndAt() == null) return RecordStatus.ACTIVE;        // NEW
         Instant now = Instant.now();
 
         if (now.isBefore(election.getStartAt())) {
@@ -867,7 +935,99 @@ public class ElectionService {
                 .getVotingType();
     }
 
+    // =========================================================
+// POSITION BALANCE VALIDATION
+// =========================================================
+
+    /**
+     * Every partylist in an SSC election must run a candidate for the
+     * exact same set of positions. If one partylist has an Auditor and
+     * another doesn't, the election is rejected.
+     */
+    private void assertBalancedPartylistPositions(List<UUID> partylistIds) {
+        Set<String> referencePositions = null;
+
+        for (UUID partylistId : partylistIds) {
+            Set<String> positions = partylistMemberRepository.findByPartylistId(partylistId)
+                    .stream()
+                    .map(PartylistMember::getPosition)
+                    .filter(p -> p != null && !p.isBlank())
+                    .map(p -> p.trim().toLowerCase())
+                    .collect(Collectors.toSet());
+
+            if (referencePositions == null) {
+                referencePositions = positions;
+            } else if (!referencePositions.equals(positions)) {
+                throw new IllegalArgumentException(
+                        "All partylists must have the exact same set of positions. " +
+                                "Every partylist must field a candidate for every position " +
+                                "(e.g., if one partylist has an Auditor, every partylist must have one)."
+                );
+            }
+        }
+    }
+
+    /**
+     * Same rule as above, but for Department elections whose voting type
+     * is PARTYLIST. Representative-type departments are never checked.
+     */
+    private void assertBalancedDepartmentPositions(List<UUID> departmentIds) {
+        Set<String> referencePositions = null;
+
+        for (UUID departmentId : departmentIds) {
+            Set<String> positions = departmentMemberRepository.findByDepartmentId(departmentId)
+                    .stream()
+                    .map(DepartmentMember::getPosition)
+                    .filter(p -> p != null && !p.isBlank())
+                    .map(p -> p.trim().toLowerCase())
+                    .collect(Collectors.toSet());
+
+            if (referencePositions == null) {
+                referencePositions = positions;
+            } else if (!referencePositions.equals(positions)) {
+                throw new IllegalArgumentException(
+                        "All departments in this election must have the exact same set of positions. " +
+                                "Every department must field a candidate for every position " +
+                                "(e.g., if one department has an Auditor, every department must have one)."
+                );
+            }
+        }
+    }
+
     private void broadcastAnalyticsUpdate() {
         messagingTemplate.convertAndSend("/topic/analytics", analyticsService.getFullAnalytics());
+    }
+
+    public Election scheduleDrawElection(UUID id, Instant startAt, Instant endAt, HttpServletRequest request) {
+        Election election = getById(id);
+
+        if (!election.isDrawElection())
+            throw new IllegalArgumentException("Only draw elections can be scheduled here.");
+
+        RecordStatus current = calculateElectionStatus(election);
+        if (current == RecordStatus.ONGOING || current == RecordStatus.CONCLUDED)
+            throw new IllegalStateException("This draw election has already started or ended.");
+
+        if (startAt == null || endAt == null)
+            throw new IllegalArgumentException("Election schedule is required.");
+        if (!endAt.isAfter(startAt))
+            throw new IllegalArgumentException("End date must be after start date.");
+
+        electionRepository.findById(election.getParentElectionId()).ifPresent(parent -> {
+            if (parent.getEndAt() != null && startAt.isBefore(parent.getEndAt()))
+                throw new IllegalArgumentException("A draw election must start after the original election has ended.");
+        });
+
+        election.setStartAt(startAt);
+        election.setEndAt(endAt);
+        Election saved = electionRepository.save(election);
+        voteSyncService.refreshVoters(List.of());   // just republishes VoteCastEvent so live pages refresh
+
+        auditLogService.log(request, AuditAction.UPDATE, "Elections", saved.getId(),
+                "scheduled draw election \"" + saved.getTitle() + "\"",
+                Map.of("startAt", startAt.toString(), "endAt", endAt.toString()));
+
+        realtime.electionsChanged(saved.getCampusId());
+        return saved;
     }
 }

@@ -10,6 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initializeForgotPassword();
 
+  initializePasswordToggles();
+
 //  applyBranding();
 });
 
@@ -38,6 +40,30 @@ document.addEventListener("DOMContentLoaded", () => {
 //    console.error("Failed to load branding:", err);
 //  }
 //}
+
+function initializePasswordToggles() {
+  const toggles = document.querySelectorAll(".password-toggle");
+
+  toggles.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.getAttribute("data-target");
+      const input = document.getElementById(targetId);
+      const icon = btn.querySelector("i");
+
+      if (!input) return;
+
+      const isHidden = input.type === "password";
+      input.type = isHidden ? "text" : "password";
+
+      if (icon) {
+        icon.classList.toggle("bi-eye", !isHidden);
+        icon.classList.toggle("bi-eye-slash", isHidden);
+      }
+
+      btn.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+    });
+  });
+}
 
 /* =========================================================
    ACTION LOADING MODAL
@@ -246,7 +272,7 @@ function initializeForgotPassword() {
    */
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && modal.classList.contains("active")) {
+    if (event.key === "Escape" && modal.classList.contains("show")) {
       closeForgotPasswordModal();
     }
   });
@@ -331,58 +357,28 @@ function initializeForgotPasswordInputs() {
 
 async function verifyEmail() {
   const registeredEmail = document.getElementById("registeredEmail");
-
   const errorElement = document.getElementById("registeredEmailError");
-
   const email = registeredEmail.value.trim();
 
   clearFieldError(registeredEmail, errorElement);
 
-  /* -----------------------------------------
-       EMPTY
-    ----------------------------------------- */
-
   if (!email) {
     showFieldError(registeredEmail, errorElement, "Email is required.");
-
     return;
   }
-
-  /* -----------------------------------------
-       EMAIL FORMAT
-    ----------------------------------------- */
 
   if (!isValidEmail(email)) {
-    showFieldError(
-      registeredEmail,
-      errorElement,
-      "Enter a valid email address.",
-    );
-
+    showFieldError(registeredEmail, errorElement, "Enter a valid email address.");
     return;
   }
 
-  /*
-   * Disable button while communicating
-   * with the backend.
-   */
-
-  showActionLoading(
-    "Verifying Email",
-    "Checking your registered email address...",
-  );
+  showActionLoading("Verifying Email", "Checking your registered email address...");
 
   try {
     const response = await fetch("/forgot-password/verify-email", {
       method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-      },
-
-      body: JSON.stringify({
-        email: email,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email }),
     });
 
     const result = await parseJsonResponse(response);
@@ -393,22 +389,17 @@ async function verifyEmail() {
         errorElement,
         result.message || "The email could not be verified.",
       );
-
       return;
     }
 
-    /*
-     * Backend confirmed the email.
-     * Move to OTP step.
-     */
+    /* NEW: show which email the OTP was sent to, masked. */
+    const otpSentTo = document.getElementById("otpSentTo");
+    if (otpSentTo && result.maskedEmail) {
+      otpSentTo.textContent = result.maskedEmail;
+    }
 
     showResetStep("otpStep");
   } catch (error) {
-    /*
-     * This will happen while the backend
-     * endpoint does not exist or is unreachable.
-     */
-
     showFieldError(
       registeredEmail,
       errorElement,
@@ -643,7 +634,7 @@ function openForgotPasswordModal() {
 
   showResetStep("resetEmailStep");
 
-  modal.classList.add("active");
+  modal.classList.add("show");
 
   modal.setAttribute("aria-hidden", "false");
 
@@ -677,7 +668,7 @@ function closeForgotPasswordModal() {
 
   resetForgotPasswordForm();
 
-  modal.classList.remove("active");
+  modal.classList.remove("show");
 
   modal.setAttribute("aria-hidden", "true");
 
@@ -701,34 +692,35 @@ function resetForgotPasswordForm() {
 
   fields.forEach((id) => {
     const input = document.getElementById(id);
-
     if (input) {
       input.value = "";
-
       input.classList.remove("input-error", "input-success");
     }
   });
 
   const errors = [
     "registeredEmailError",
-
     "otpError",
-
     "newPasswordError",
-
     "confirmPasswordError",
   ];
 
   errors.forEach((id) => {
     const error = document.getElementById(id);
-
     if (error) {
       error.textContent = "";
     }
   });
 
+  /* NEW: reset the masked-email placeholder */
+  const otpSentTo = document.getElementById("otpSentTo");
+  if (otpSentTo) {
+    otpSentTo.textContent = "your registered email";
+  }
+
   showResetStep("resetEmailStep");
 }
+
 
 /* =========================================================
    SHOW RESET STEP

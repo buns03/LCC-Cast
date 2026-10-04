@@ -9,7 +9,10 @@ document.addEventListener("DOMContentLoaded", initializeVoters);
 ========================================================= */
 const VOTER_API = "/admin-ssc/api/voters";
 
-const voters = [];
+let voters = []; // holds only the CURRENT PAGE now, not everything
+let votersRequestId = 0;
+let totalPages = 1;
+let totalElements = 0;
 
 /* =========================================================
    STATE
@@ -70,13 +73,73 @@ function initializeVoters() {
   initializeActionLoadingModal();
   initializeSearch();
   initializeFiltersPanel();
-  populateMultiProgramFilter();
-  populateMultiSectionFilter();
+  loadFacets();
   initializePagination();
   initializeExport();
   initializeImport();
   initializeDeleteAndArchive();
   loadVoters();
+}
+
+async function loadFacets() {
+  try {
+    const data = await SoftCache.load(`${VOTER_API}/facets`, { ttl: 300000 });
+    renderProgramFilterOptions(data.programs || []);
+    renderSectionFilterOptions(data.sections || []);
+  } catch (e) {
+    console.error("Failed to load filter facets:", e);
+  }
+}
+
+function renderProgramFilterOptions(programs) {
+  const container = $("multiProgramOptions");
+  if (!container) return;
+  container.innerHTML = "";
+  programs.forEach((program) => {
+    const label = document.createElement("label");
+    label.className = "filter-check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = program;
+    input.dataset.filterType = "program";
+    const span = document.createElement("span");
+    span.textContent = program;
+    label.append(input, span);
+    container.appendChild(label);
+  });
+}
+
+function renderSectionFilterOptions(sections) {
+  const container = $("multiSectionOptions");
+  if (!container) return;
+  container.innerHTML = "";
+  sections.forEach((section) => {
+    const label = document.createElement("label");
+    label.className = "filter-check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = section;
+    input.dataset.filterType = "section";
+    const span = document.createElement("span");
+    span.textContent = section;
+    label.append(input, span);
+    container.appendChild(label);
+  });
+}
+
+async function refreshSectionFacets() {
+  const selectedPrograms = getSelectedProgramsFromPanel();
+
+  try {
+    const params = new URLSearchParams();
+    selectedPrograms.forEach(p => params.append("program", p));
+    const data = await SoftCache.load(`${VOTER_API}/facets?${params.toString()}`, { ttl: 300000 });
+    renderSectionFilterOptions(data.sections || []);
+  } catch (e) {
+    console.error("Failed to refresh section facets:", e);
+  }
+
+  updatePendingFilterCount();
 }
 
 /* =========================================================
@@ -117,7 +180,7 @@ function initializeSearch() {
     voterState.search = input.value.trim().toLowerCase();
     voterState.page = 1;
     renderAutocomplete();
-    renderVoters();
+    loadVoters();
   });
 
   input.addEventListener("focus", renderAutocomplete);
@@ -188,7 +251,7 @@ function initializeFiltersPanel() {
     voterState.page = 1;
     panel.classList.remove("show");
     button.classList.remove("active");
-    renderVoters();
+    loadVoters();
   });
 
   $("filtersClearBtn")?.addEventListener("click", clearAllFilters);
@@ -200,14 +263,13 @@ function initializeFiltersPanel() {
     }
   });
 
-  panel.addEventListener("change", (e) => {
-    // Program changes rebuild the Section list immediately.
-    if (e.target.matches('input[data-filter-type="program"]')) {
-      populateMultiSectionFilter();
-      return;
-    }
-    updatePendingFilterCount();
-  });
+    panel.addEventListener("change", (e) => {
+        if (e.target.matches('input[data-filter-type="program"]')) {
+          refreshSectionFacets();
+          return;
+        }
+        updatePendingFilterCount();
+    });
 }
 
 function applySelectedFilters() {
@@ -221,13 +283,7 @@ function applySelectedFilters() {
     if (newFilters[type]) newFilters[type].push(input.value);
   });
 
-  // Keep only sections that still belong to the selected programs.
-  if (newFilters.program.length) {
-    const validSections = new Set(
-      voters.filter((v) => newFilters.program.includes(v.program)).map((v) => v.section).filter(Boolean)
-    );
-    newFilters.section = newFilters.section.filter((s) => validSections.has(s));
-  }
+  // (deleted section-validation block)
 
   newFilters.nameSort = panel.querySelector('input[name="nameSort"]:checked')?.value || "default";
   newFilters.timeSort = panel.querySelector('input[name="timeSort"]:checked')?.value || "default";
@@ -252,8 +308,8 @@ function updatePendingFilterCount() {
     (sum, type) => sum + panel.querySelectorAll(`input[data-filter-type="${type}"]:checked`).length,
     0
   );
-  if (panel.querySelector('input[name="nameSort"]:checked')) count++;
-  if (panel.querySelector('input[name="timeSort"]:checked')) count++;
+ if (panel.querySelector('input[name="nameSort"]:checked:not([value="default"])')) count++;
+if (panel.querySelector('input[name="timeSort"]:checked:not([value="default"])')) count++;
 
   selectedText.textContent = `${count} selected`;
 }
@@ -273,8 +329,12 @@ function clearAllFilters() {
   const panel = $("filtersPanel");
   if (!panel) return;
 
-  panel.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach((input) => {
+    panel.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach((input) => {
     input.checked = false;
+  });
+
+  panel.querySelectorAll('input[type="radio"][value="default"]').forEach((input) => {
+    input.checked = true;
   });
 
   FILTER_TYPES.forEach((type) => (voterState[type] = []));
@@ -283,7 +343,49 @@ function clearAllFilters() {
   voterState.page = 1;
 
   updateFilterCount();
-  renderVoters();
+  loadVoters();
+}
+
+/* =========================================================
+   SORTING (Name / Voting Time)
+========================================================= */
+
+function getLatestVoteTime(voter) {
+  const times = [voter.sscTime, voter.departmentTime]
+    .filter(Boolean)
+    .map((t) => new Date(t).getTime())
+    .filter((t) => !isNaN(t));
+  return times.length ? Math.max(...times) : null;
+}
+
+function applyClientSort(list) {
+  const sorted = [...list];
+  const byTime = voterState.timeSort;
+  const byName = voterState.nameSort;
+
+  if (byTime === "default" && byName === "default") return sorted;
+
+  sorted.sort((a, b) => {
+    if (byTime !== "default") {
+      const ta = getLatestVoteTime(a);
+      const tb = getLatestVoteTime(b);
+
+      if (ta !== tb) {
+        if (ta === null) return 1;   // not voted always goes last
+        if (tb === null) return -1;
+        return byTime === "Newest" ? tb - ta : ta - tb;
+      }
+    }
+
+    if (byName !== "default") {
+      const cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      return byName === "A-Z" ? cmp : -cmp;
+    }
+
+    return 0;
+  });
+
+  return sorted;
 }
 
 function normalizeBackendVoter(voter) {
@@ -319,49 +421,6 @@ function normalizeBackendVoter(voter) {
   };
 }
 
-function populateMultiProgramFilter() {
-  const container = $("multiProgramOptions");
-  if (!container) return;
-
-  const selectedPrograms = [
-    ...container.querySelectorAll(
-      'input[data-filter-type="program"]:checked'
-    )
-  ].map((input) => input.value);
-
-  const programs = [
-    ...new Set(
-      voters
-        .map((voter) => voter.program)
-        .filter((program) => program && program.trim())
-    )
-  ].sort((a, b) => a.localeCompare(b));
-
-  container.innerHTML = "";
-
-  programs.forEach((program) => {
-    const label = document.createElement("label");
-    label.className = "filter-check";
-
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = program;
-    input.dataset.filterType = "program";
-    input.checked = selectedPrograms.includes(program);
-
-    const span = document.createElement("span");
-    span.textContent = program;
-
-    label.append(input, span);
-    container.appendChild(label);
-  });
-
-  voterState.program = selectedPrograms.filter((program) =>
-    programs.includes(program)
-  );
-
-  updatePendingFilterCount();
-}
 
 function showVotersSkeleton() {
   $("votersSkeleton")?.classList.remove("hidden");
@@ -374,58 +433,46 @@ function hideVotersSkeleton() {
 }
 
 async function loadVoters() {
-showVotersSkeleton();
+  const requestId = ++votersRequestId;
+  showVotersSkeleton();
   try {
-    const response = await fetch("/admin-ssc/api/voters", {
-      method: "GET",
-      headers: {
-        Accept: "application/json"
-      },
-      credentials: "same-origin"
+    const params = new URLSearchParams({
+      page: String(voterState.page - 1),
+      size: String(voterState.perPage),
     });
 
-    const result = await response.json();
-
-    console.log("VOTERS API STATUS:", response.status);
-    console.log("VOTERS API DATA:", result);
-
-    if (!response.ok) {
-      throw new Error(
-        result?.message ||
-        `Failed to load voters. HTTP ${response.status}`
-      );
+    // admin-ssc / superadmin only — admin-dept omits this block
+    const campusUUIDMap = { "Kaypian": "62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8", "Muzon": "9bc86421-63ce-4a7e-94ae-fc1bc6328956" };
+    if (voterState.campus.length === 1) {
+      params.set("campusId", campusUUIDMap[voterState.campus[0]] || voterState.campus[0]);
     }
 
-    const data = Array.isArray(result)
-      ? result
-      : Array.isArray(result.data)
-        ? result.data
-        : [];
+    if (voterState.program.length === 1) params.set("program", voterState.program[0]);
+    if (voterState.section.length === 1) params.set("section", voterState.section[0]);
+    if (voterState.year.length === 1) params.set("yearLevel", voterState.year[0]);
+    if (voterState.search) params.set("search", voterState.search);
+    if (voterState.nameSort !== "default") params.set("nameSort", voterState.nameSort);
+    if (voterState.timeSort !== "default") params.set("timeSort", voterState.timeSort);
+    if (voterState.sscStatus.length === 1) params.set("sscStatus", voterState.sscStatus[0]);
 
-    voters.length = 0;
-
-    data.forEach((voter) => {
-      voters.push(normalizeBackendVoter(voter));
+    const result = await SoftCache.load(`${VOTER_API}/page?${params.toString()}`, {
+      ttl: 20000,
+      swr: false,
     });
 
-    console.log("NORMALIZED VOTERS:", voters);
+    if (requestId !== votersRequestId) return; // a newer request has already started — drop this stale response
 
-    populateMultiProgramFilter();
-    populateMultiSectionFilter();
-    updateFilterCount();
+    voters = (result.content || []).map(normalizeBackendVoter);
+    totalPages = result.totalPages || 1;
+    totalElements = result.totalElements || 0;
+
     renderVoters();
-
   } catch (error) {
+    if (requestId !== votersRequestId) return; // stale error — a newer request superseded this one
     console.error("Failed to load voters:", error);
-
-    showVotersStatusModal(
-      "error",
-      "Failed to Load Voters",
-      error.message || "Unable to load voter records."
-    );
-
+    showVotersStatusModal("error", "Failed to Load Voters", error.message || "Unable to load voter records.");
   } finally {
-    hideVotersSkeleton()
+    if (requestId === votersRequestId) hideVotersSkeleton();
   }
 }
 
@@ -437,59 +484,25 @@ function initializePagination() {
   $("previousPage")?.addEventListener("click", () => {
     if (voterState.page <= 1) return;
     voterState.page--;
-    renderVoters();
+    loadVoters();
   });
 
   $("nextPage")?.addEventListener("click", () => {
-    if (voterState.page >= getTotalPages()) return;
+    if (voterState.page >= totalPages) return;   // CHANGED — was getTotalPages()
     voterState.page++;
-    renderVoters();
+    loadVoters();
   });
 }
 
-function getTotalPages() {
-  return Math.max(1, Math.ceil(getFilteredVoters().length / voterState.perPage));
-}
 
-function updatePagination(totalPages) {
+function updatePagination() {                    // CHANGED — no longer takes a param
   const previous = $("previousPage");
   const next = $("nextPage");
-
   if ($("paginationText")) $("paginationText").textContent = `Page ${voterState.page} / ${totalPages}`;
   if (previous) previous.disabled = voterState.page <= 1;
   if (next) next.disabled = voterState.page >= totalPages;
 }
 
-/* =========================================================
-   FILTER + SORT DATA
-========================================================= */
-
-function getFilteredVoters() {
-  let result = voters.filter((v) => !v.archived);
-
-  if (voterState.search) {
-    const search = voterState.search;
-    result = result.filter((v) => [v.name, v.id, v.program].some((f) => f.toLowerCase().includes(search)));
-  }
-
-  FILTER_TYPES.forEach((type) => {
-    if (voterState[type].length) result = result.filter((v) => voterState[type].includes(v[type]));
-  });
-
-  if (voterState.nameSort === "A-Z") result.sort((a, b) => a.name.localeCompare(b.name));
-  if (voterState.nameSort === "Z-A") result.sort((a, b) => b.name.localeCompare(a.name));
-
-  if (voterState.timeSort === "Oldest" || voterState.timeSort === "Newest") {
-    const dir = voterState.timeSort === "Oldest" ? 1 : -1;
-    result.sort((a, b) => {
-      if (!a.time) return 1;
-      if (!b.time) return -1;
-      return dir * (new Date(a.time) - new Date(b.time));
-    });
-  }
-
-  return result;
-}
 
 /* =========================================================
    RENDER VOTERS
@@ -500,16 +513,9 @@ function renderVoters() {
   const empty = $("votersEmpty");
   if (!list || !empty) return;
 
-  const filtered = getFilteredVoters();
-  const totalPages = Math.max(1, Math.ceil(filtered.length / voterState.perPage));
-  if (voterState.page > totalPages) voterState.page = totalPages;
-
-  const start = (voterState.page - 1) * voterState.perPage;
-  const pageItems = filtered.slice(start, start + voterState.perPage);
-
   list.innerHTML = "";
-  empty.classList.toggle("show", !pageItems.length);
-  pageItems.forEach((voter) => list.appendChild(createVoterElement(voter)));
+  empty.classList.toggle("show", !voters.length);
+  voters.forEach((voter) => list.appendChild(createVoterElement(voter)));
 
   updatePagination(totalPages);
 }
@@ -602,37 +608,6 @@ function getSelectedProgramsFromPanel() {
   return [...panel.querySelectorAll('input[data-filter-type="program"]:checked')].map((i) => i.value);
 }
 
-function populateMultiSectionFilter() {
-  const container = $("multiSectionOptions");
-  if (!container) return;
-
-  const selectedPrograms = getSelectedProgramsFromPanel();
-  const selectedSections = [...container.querySelectorAll('input[data-filter-type="section"]:checked')].map((i) => i.value);
-
-  const pool = selectedPrograms.length ? voters.filter((v) => selectedPrograms.includes(v.program)) : voters;
-  const sections = [...new Set(pool.map((v) => v.section).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-
-  container.innerHTML = "";
-  sections.forEach((section) => {
-    const label = document.createElement("label");
-    label.className = "filter-check";
-
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = section;
-    input.dataset.filterType = "section";
-    input.checked = selectedSections.includes(section);
-
-    const span = document.createElement("span");
-    span.textContent = section;
-
-    label.append(input, span);
-    container.appendChild(label);
-  });
-
-  voterState.section = selectedSections.filter((s) => sections.includes(s));
-  updatePendingFilterCount();
-}
 
 /* =========================================================
    STATUS MODAL (generic info/success/error popup)
@@ -894,28 +869,14 @@ function deleteVoter(uuid) {
 }
 
 function deleteAllVoters() {
-  const activeVoters = getFilteredVoters();
-
-  if (!activeVoters.length) {
-    showSuccessToast(
-      "Delete Failed",
-      "There are no active voters to delete."
-    );
-    return;
-  }
-
   voterState.pendingDeleteId = null;
   voterState.pendingDeleteAll = true;
 
   if ($("deleteVoterMessage")) {
     $("deleteVoterMessage").textContent =
-      `Are you sure you want to permanently delete all ${activeVoters.length} active voters? This action cannot be undone.`;
+      `Are you sure you want to permanently delete all voters matching the current filters? This action cannot be undone.`;
   }
-
-  if ($("deleteVoterTitle")) {
-    $("deleteVoterTitle").textContent = "Delete All Voters?";
-  }
-
+  if ($("deleteVoterTitle")) $("deleteVoterTitle").textContent = "Delete All Voters?";
   $("deleteVoterModal")?.classList.add("show");
 }
 
@@ -970,57 +931,33 @@ async function performDeleteVoter(id) {
 }
 
 async function performDeleteAllVoters() {
-  const votersToDelete = getFilteredVoters();
-
-  const ids = votersToDelete.map(voter => voter.uuid);
-
-  if (!ids.length) {
-    closeDeleteModal();
-    window.hideActionLoading();
-    return;
-  }
+  const filter = {
+    program: voterState.program[0] || null,
+    yearLevel: voterState.year[0] || null,
+    section: voterState.section[0] || null,
+    search: voterState.search || null,
+  };
 
   try {
-    const response = await fetch(`${VOTER_API}/bulk`, {
+    const response = await fetch(`${VOTER_API}/delete-matching`, {
       method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify(ids)
+      body: JSON.stringify(filter),
     });
 
     const result = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(
-        result.message || "Failed to delete voters."
-      );
-    }
-
-    const count = result.count ?? ids.length;
+    if (!response.ok) throw new Error(result.message || "Failed to delete voters.");
 
     closeDeleteModal();
-
+    voterState.page = 1;
     await loadVoters();
 
-    showSuccessToast(
-      "Voters Moved to Trash",
-      `${count} voter(s) were moved to trash successfully.`
-    );
-
+    showSuccessToast("Voters Moved to Trash", `${result.count ?? 0} voter(s) were moved to trash successfully.`);
   } catch (error) {
     console.error("Delete all voters failed:", error);
-
     closeDeleteModal();
-
-    showVotersStatusModal(
-      "error",
-      "Delete Failed",
-      error.message || "Unable to delete voters."
-    );
-
+    showVotersStatusModal("error", "Delete Failed", error.message || "Unable to delete voters.");
   } finally {
     window.hideActionLoading();
   }
@@ -1291,33 +1228,13 @@ function initializeActionLoadingModal() {
 
 function initializeExport() {
   $("exportVoters")?.addEventListener("click", () => {
-    const data = getFilteredVoters();
-    if (!data.length) {
-      showVotersStatusModal("error", "Export Failed", "There are no voters to export.");
-      return;
-    }
+    const params = new URLSearchParams();
+    if (voterState.program[0]) params.set("program", voterState.program[0]);
+    if (voterState.section[0]) params.set("section", voterState.section[0]);
+    if (voterState.year[0]) params.set("yearLevel", voterState.year[0]);
+    if (voterState.search) params.set("search", voterState.search);
 
-        const headers = ["Student ID", "Full Name", "Course", "Year Level", "Section", "Campus", "Email", "SSC Voting Status", "SSC Time Voted"];
-        const rows = data.map((v) => [
-          v.id, v.name, v.program, v.year, v.section || "", v.campus || "", v.email || "",
-          v.sscStatus, v.sscTime ? formatDateTime(v.sscTime) : "",
-        ]);
-
-    const csv = [headers, ...rows]
-      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "lccast-voters.csv";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-
-    showSuccessToast("Export Successful", `${data.length} voter(s) exported successfully.`);
+    window.location.href = `${VOTER_API}/export?${params.toString()}`;
   });
 }
 
@@ -1461,6 +1378,7 @@ function normalizeImportedVoter(row) {
   const programCourse = get("Course") || get("Program");
   const yearLevel = get("Year Level") || get("Year");
   const section = get("Section");
+  const campus = get("Campus"); // optional — if present and it doesn't match your campus, the row is skipped
 
   if (!studentId || !fullName) return null;
 
@@ -1473,7 +1391,6 @@ function normalizeImportedVoter(row) {
 
   return {
     studentId, lastName, firstName, middleName, fullName,
-    email, programCourse, yearLevel, section,
-    campusId: document.body.dataset.adminCampusId || "" // ignored by server anyway, but consistent
+    email, programCourse, yearLevel, section, campus
   };
 }

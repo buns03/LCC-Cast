@@ -9,7 +9,10 @@
     />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>LCCast | Partylists</title>
+    <title>LCC Cast | Partylists</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
     <link rel="stylesheet" href="/css/base.css" />
     <link rel="stylesheet" href="/css/admin/layout.css" />
     <link rel="stylesheet" href="/css/components.css" />
@@ -47,7 +50,7 @@ MOBILE NAVIGATION OVERLAY
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
         <div class="logo">
-            <img src="/images/lcccast_logo.png" alt="LCCast" />
+            <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
             <h2 >LCC Cast</h2>
         </div>
@@ -300,17 +303,6 @@ MOBILE NAVIGATION OVERLAY
 
     <section class="partylists-section" id="existingPartylists">
         <div class="partylists-content-container">
-<!--            <div class="existing-partylists-toolbar">-->
-<!--                <div class="existing-partylists-filter-group">-->
-<!--                    <label for="campusFilter">Campus</label>-->
-
-<!--                    <select id="campusFilter">-->
-<!--                        <option value="all">All Campuses</option>-->
-<!--                        <option value="62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8">College</option>-->
-<!--                        <option value="9bc86421-63ce-4a7e-94ae-fc1bc6328956">Muzon</option>-->
-<!--                    </select>-->
-<!--                </div>-->
-<!--            </div>-->
 
             <div class="partylists-list">
                 <article class="partylists-item" data-id="DATABASE_PARTYLIST_UUID">
@@ -342,7 +334,7 @@ MOBILE NAVIGATION OVERLAY
                             <!-- CAMPUS -->
                             <div class="partylists-campus">
                                 <i class="bi bi-building"></i>
-                                <span>College</span>
+                                <span>Kaypian</span>
                             </div>
 
                             <!-- CONTROLS -->
@@ -407,7 +399,7 @@ MOBILE NAVIGATION OVERLAY
                                         <label>Campus:</label>
 
                                         <span class="existing-partylists-campus">
-                          College
+                          Kaypian
                         </span>
                                     </div>
 
@@ -594,7 +586,7 @@ MOBILE NAVIGATION OVERLAY
                                                     value="62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8"
                                                     selected
                                             >
-                                                College
+                                                Kaypian
                                             </option>
 
                                             <option
@@ -913,7 +905,7 @@ MOBILE NAVIGATION OVERLAY
                                                     value="62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8"
                                                     selected
                                             >
-                                                College
+                                                Kaypian
                                             </option>
 
                                             <option
@@ -1187,7 +1179,7 @@ MOBILE NAVIGATION OVERLAY
 
                 <h2>Logout?</h2>
 
-                <p>Are you sure you want to logout from LCCast?</p>
+                <p>Are you sure you want to logout from LCC Cast?</p>
             </div>
 
             <div class="modal-footer">
@@ -1244,7 +1236,7 @@ MOBILE NAVIGATION OVERLAY
         </button>
     </div>
 </main>
-
+<script src="/js/superadmin/soft-cache.js"></script>
 <script src="/js/navigation.js"></script>
 <!-- <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script> -->
 
@@ -1256,6 +1248,9 @@ MOBILE NAVIGATION OVERLAY
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
 </script>
+
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
 
 <script src="/js/admin-ssc/partylists/partylists-utils.js"></script>
 <script src="/js/admin-ssc/partylists/partylists-campus.js"></script>

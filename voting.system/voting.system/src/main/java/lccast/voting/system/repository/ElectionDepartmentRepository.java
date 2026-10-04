@@ -1,7 +1,10 @@
 package lccast.voting.system.repository;
 
 import lccast.voting.system.model.ElectionDepartment;
+import lccast.voting.system.model.RecordStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.UUID;
@@ -31,4 +34,20 @@ public interface ElectionDepartmentRepository
             @org.springframework.data.repository.query.Param("category") lccast.voting.system.model.ElectionCategory category,
             @org.springframework.data.repository.query.Param("status") lccast.voting.system.model.RecordStatus status
     );
+
+    @Query("""
+    select count(ed) > 0
+    from ElectionDepartment ed
+    where ed.department.id = :departmentId
+      and ed.election.schoolYear = :schoolYear
+      and ed.election.status = :status
+      and ed.election.id <> :excludeElectionId
+""")
+    boolean existsActiveForSchoolYear(
+            @Param("departmentId") UUID departmentId,
+            @Param("schoolYear") String schoolYear,
+            @Param("status") RecordStatus status,
+            @Param("excludeElectionId") UUID excludeElectionId
+    );
+
 }

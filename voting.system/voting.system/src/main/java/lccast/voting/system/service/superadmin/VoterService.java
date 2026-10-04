@@ -7,6 +7,7 @@ import lccast.voting.system.model.*;
 import lccast.voting.system.repository.*;
 
 import lccast.voting.system.service.AuditLogService;
+import lccast.voting.system.service.RealtimeBroadcastService;
 import lccast.voting.system.service.SupabaseAdminCreateUserResponse;
 import lccast.voting.system.service.SupabaseAuthService;
 import lccast.voting.system.service.student.VoterDepartmentElectionService;
@@ -34,6 +35,7 @@ public class VoterService {
     private final ElectionRepository electionRepository;
     private final VoteLogRepository voteLogRepository;
     private final lccast.voting.system.service.student.VoterDepartmentElectionService voterDepartmentElectionService;
+    private  final RealtimeBroadcastService realtime;
 
     public VoterService(
             VoterRepository voterRepository,
@@ -47,7 +49,8 @@ public class VoterService {
             SimpMessagingTemplate messagingTemplate,   // ADD
             ElectionRepository electionRepository,
             VoteLogRepository voteLogRepository,
-            VoterDepartmentElectionService voterDepartmentElectionService
+            VoterDepartmentElectionService voterDepartmentElectionService,
+            RealtimeBroadcastService realtime
     ) {
         this.voterRepository = voterRepository;
         this.campusRepository = campusRepository;
@@ -61,6 +64,7 @@ public class VoterService {
         this.electionRepository = electionRepository;
         this.voteLogRepository = voteLogRepository;
         this.voterDepartmentElectionService = voterDepartmentElectionService;
+        this.realtime = realtime;
     }
 
     // =========================================================
@@ -126,6 +130,8 @@ public class VoterService {
                     e
             );
         }
+
+        realtime.dashboardChanged(voter.getCampusId(), null);
     }
 
     // =========================================================
@@ -191,6 +197,8 @@ public class VoterService {
                     e
             );
         }
+
+        realtime.dashboardChanged(voter.getCampusId(), null);
     }
 
     // =========================================================
@@ -218,7 +226,10 @@ public class VoterService {
                     archiveRecordRepository.save(r);
                 });
 
-        voterRepository.findById(voterId).ifPresent(this::enableVoterAccount);
+        voterRepository.findById(voterId).ifPresent(voter -> {
+            enableVoterAccount(voter);
+            realtime.dashboardChanged(voter.getCampusId(), null);
+        });
     }
 
 // =========================================================
@@ -264,55 +275,46 @@ public class VoterService {
             List<UUID> ids,
             HttpServletRequest request
     ) {
-        int count = 0;
+        if (ids == null || ids.isEmpty()) return 0;
+
+        // Snapshot before mutating — needed for trash records + Supabase disabling
+        List<Voter> targets = voterRepository.findAllById(ids);
+        if (targets.isEmpty()) return 0;
+
+        Object userIdAttribute = request.getSession().getAttribute("userId");
+        UUID userId = userIdAttribute != null ? UUID.fromString(userIdAttribute.toString()) : null;
 
         List<Map<String, Object>> deletedVoters = new ArrayList<>();
+        List<TrashRecord> records = new ArrayList<>();
 
-        Object userIdAttribute =
-                request.getSession().getAttribute("userId");
-
-        UUID userId = null;
-
-        if (userIdAttribute != null) {
-            userId = UUID.fromString(userIdAttribute.toString());
-        }
-
-        for (UUID id : ids) {
-
-            Voter voter = voterRepository.findById(id)
-                    .orElseThrow(() ->
-                            new RuntimeException("Voter not found.")
-                    );
-
+        for (Voter voter : targets) {
             TrashRecord record = new TrashRecord();
-
             record.setEntityType("Students");
             record.setEntityId(voter.getId());
             record.setEntityName(voter.getFullName());
             record.setData(voterSnapshot(voter));
             record.setDeletedAt(Instant.now());
             record.setDeletedBy(userId);
+            records.add(record);
 
-            trashRecordRepository.save(record);
-
-
-
-            voter.setStatus(RecordStatus.DELETED);
-            voter.setUpdatedAt(Instant.now());
-
-            voterRepository.save(voter);
-            disableVoterAccount(voter);
-
-            deletedVoters.add(
-                    Map.of(
-                            "id", voter.getId(),
-                            "studentId", voter.getStudentId(),
-                            "fullName", voter.getFullName()
-                    )
-            );
-
-            count++;
+            deletedVoters.add(Map.of(
+                    "id", voter.getId(),
+                    "studentId", voter.getStudentId(),
+                    "fullName", voter.getFullName()
+            ));
         }
+
+        trashRecordRepository.saveAll(records);
+
+        // ONE bulk SQL UPDATE instead of N individual saves
+        int count = voterRepository.bulkUpdateStatus(ids, RecordStatus.DELETED);
+
+        // Fire-and-forget: don't block this request on N Supabase HTTP calls
+        List<UUID> authUserIds = targets.stream()
+                .map(Voter::getAuthUserId)
+                .filter(Objects::nonNull)
+                .toList();
+        disableVoterAccountsAsync(authUserIds);
 
         if (count > 0) {
             auditLogService.log(
@@ -321,17 +323,20 @@ public class VoterService {
                     "Students",
                     null,
                     "Moved " + count + " voters to trash",
-                    Map.of(
-                            "count", count,
-                            "voters", deletedVoters
-                    )
+                    Map.of("count", count, "voters", deletedVoters)
             );
 
-            messagingTemplate.convertAndSend(          // ADD
+            messagingTemplate.convertAndSend(
                     "/topic/history/trash",
                     HistoryEventDTO.ofCount("BULK_TRASHED", count)
             );
         }
+
+        targets.stream()
+                .map(Voter::getCampusId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .forEach(cid -> realtime.dashboardChanged(cid, null));
 
         return count;
     }
@@ -345,55 +350,43 @@ public class VoterService {
             List<UUID> ids,
             HttpServletRequest request
     ) {
-        int count = 0;
+        if (ids == null || ids.isEmpty()) return 0;
+
+        List<Voter> targets = voterRepository.findAllById(ids);
+        if (targets.isEmpty()) return 0;
+
+        Object userIdAttribute = request.getSession().getAttribute("userId");
+        UUID userId = userIdAttribute != null ? UUID.fromString(userIdAttribute.toString()) : null;
 
         List<Map<String, Object>> archivedVoters = new ArrayList<>();
+        List<ArchiveRecord> records = new ArrayList<>();
 
-        Object userIdAttribute =
-                request.getSession().getAttribute("userId");
-
-        UUID userId = null;
-
-        if (userIdAttribute != null) {
-            userId = UUID.fromString(userIdAttribute.toString());
-        }
-
-        for (UUID id : ids) {
-
-            Voter voter = voterRepository.findById(id)
-                    .orElseThrow(() ->
-                            new RuntimeException("Voter not found.")
-                    );
-
+        for (Voter voter : targets) {
             ArchiveRecord record = new ArchiveRecord();
-
             record.setEntityType("Students");
             record.setEntityId(voter.getId());
             record.setEntityName(voter.getFullName());
             record.setData(voterSnapshot(voter));
             record.setArchivedAt(Instant.now());
             record.setArchivedBy(userId);
+            records.add(record);
 
-            archiveRecordRepository.save(record);
-
-
-
-            voter.setStatus(RecordStatus.ARCHIVED);
-            voter.setUpdatedAt(Instant.now());
-
-            voterRepository.save(voter);
-            disableVoterAccount(voter);
-
-            archivedVoters.add(
-                    Map.of(
-                            "id", voter.getId(),
-                            "studentId", voter.getStudentId(),
-                            "fullName", voter.getFullName()
-                    )
-            );
-
-            count++;
+            archivedVoters.add(Map.of(
+                    "id", voter.getId(),
+                    "studentId", voter.getStudentId(),
+                    "fullName", voter.getFullName()
+            ));
         }
+
+        archiveRecordRepository.saveAll(records);
+
+        int count = voterRepository.bulkUpdateStatus(ids, RecordStatus.ARCHIVED);
+
+        List<UUID> authUserIds = targets.stream()
+                .map(Voter::getAuthUserId)
+                .filter(Objects::nonNull)
+                .toList();
+        disableVoterAccountsAsync(authUserIds);
 
         if (count > 0) {
             auditLogService.log(
@@ -402,10 +395,7 @@ public class VoterService {
                     "Students",
                     null,
                     "Archived " + count + " voters",
-                    Map.of(
-                            "count", count,
-                            "voters", archivedVoters
-                    )
+                    Map.of("count", count, "voters", archivedVoters)
             );
 
             messagingTemplate.convertAndSend(
@@ -413,6 +403,12 @@ public class VoterService {
                     HistoryEventDTO.ofCount("BULK_ARCHIVED", count)
             );
         }
+
+        targets.stream()
+                .map(Voter::getCampusId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .forEach(cid -> realtime.dashboardChanged(cid, null));
 
         return count;
     }
@@ -430,6 +426,7 @@ public class VoterService {
         int added = 0;
         int updated = 0;
         int skipped = 0;
+        Set<UUID> touchedCampusIds = new HashSet<>();
 
         List<String> errors = new ArrayList<>();
 
@@ -541,6 +538,7 @@ public class VoterService {
                                     : section
                     );
                     voter.setCampusId(campusUUID);
+                    touchedCampusIds.add(campusUUID);
                     voter.setStatus(RecordStatus.ACTIVE);
                     voter.setUpdatedAt(Instant.now());
 
@@ -586,6 +584,7 @@ public class VoterService {
                                 : section
                 );
                 voter.setCampusId(campusUUID);
+                touchedCampusIds.add(campusUUID);
                 voter.setVotingStatus(VotingStatus.NOT_VOTED);
                 voter.setTimeVoted(null);
                 voter.setStatus(RecordStatus.ACTIVE);
@@ -631,6 +630,8 @@ public class VoterService {
                     )
             );
         }
+
+        touchedCampusIds.forEach(cid -> realtime.dashboardChanged(cid, null));
 
         return new ImportResult(
                 added,
@@ -826,6 +827,23 @@ public class VoterService {
         }
     }
 
+    @org.springframework.scheduling.annotation.Async("supabaseExecutor")
+    public void disableVoterAccountsAsync(List<UUID> authUserIds) {
+        for (UUID authUserId : authUserIds) {
+            userProfileRepository.findByAuthUserId(authUserId).ifPresent(profile -> {
+                profile.setActive(false);
+                userProfileRepository.save(profile);
+            });
+            try {
+                supabaseAuthService.setUserBanStatus(authUserId.toString(), "876000h");
+            } catch (Exception e) {
+                // Log and move on — a failed ban doesn't undo the archive/delete.
+                // Consider a retry table (auth_user_id, action, attempts) if this needs guarantees.
+                e.printStackTrace();
+            }
+        }
+    }
+
     public void enableVoterAccount(Voter voter) {
         if (voter.getAuthUserId() == null) return;
 
@@ -862,9 +880,13 @@ public class VoterService {
         }
 
         Map<UUID, UUID> departmentElectionIdByVoter = new HashMap<>();
+        Map<String, Optional<lccast.voting.system.model.Election>> electionCache = new HashMap<>();
+
         for (Voter voter : voters) {
-            voterDepartmentElectionService.resolveVisibleElection(voter)
-                    .ifPresent(election -> departmentElectionIdByVoter.put(voter.getId(), election.getId()));
+            String key = voter.getCampusId() + "|" + voter.getProgramCourse();
+            Optional<lccast.voting.system.model.Election> election =
+                    electionCache.computeIfAbsent(key, k -> voterDepartmentElectionService.resolveElectionForStatus(voter));
+            election.ifPresent(e -> departmentElectionIdByVoter.put(voter.getId(), e.getId()));
         }
 
         Set<UUID> relevantElectionIds = new HashSet<>();
@@ -901,7 +923,7 @@ public class VoterService {
                 .ifPresent(election -> sscElectionIdByCampus.put(voter.getCampusId(), election.getId()));
 
         Map<UUID, UUID> departmentElectionIdByVoter = new HashMap<>();
-        voterDepartmentElectionService.resolveVisibleElection(voter)
+        voterDepartmentElectionService.resolveElectionForStatus(voter)
                 .ifPresent(election -> departmentElectionIdByVoter.put(voter.getId(), election.getId()));
 
         Set<UUID> relevantElectionIds = new HashSet<>();
@@ -962,5 +984,67 @@ public class VoterService {
 
         response.put("status", voter.getStatus().name());
         return response;
+    }
+
+    // Only these values may reach the query; anything else becomes "default".
+    public String normalizeNameSort(String value) {
+        return ("A-Z".equals(value) || "Z-A".equals(value)) ? value : "default";
+    }
+
+    public String normalizeTimeSort(String value) {
+        return ("Newest".equals(value) || "Oldest".equals(value)) ? value : "default";
+    }
+
+    private static final UUID NO_MATCH_SENTINEL = new UUID(0L, 0L);
+
+    // Turns an empty/null id set into a one-element list that can never match a
+// real voter, so it's always safe to bind into a JPQL IN(...) clause.
+    public List<UUID> safeIdList(Set<UUID> ids) {
+        return (ids == null || ids.isEmpty()) ? List.of(NO_MATCH_SENTINEL) : new ArrayList<>(ids);
+    }
+
+    public Set<UUID> resolveSscVotedVoterIds(UUID campusId) {
+        List<UUID> campusIds = campusId != null
+                ? List.of(campusId)
+                : campusRepository.findAll().stream().map(Campus::getId).toList();
+
+        Set<UUID> electionIds = new HashSet<>();
+        for (UUID cid : campusIds) {
+            electionRepository.findByCampusIdAndCategoryAndStatus(cid, ElectionCategory.SSC, RecordStatus.ACTIVE)
+                    .stream().findFirst()
+                    .ifPresent(e -> electionIds.add(e.getId()));
+        }
+        if (electionIds.isEmpty()) return Set.of();
+
+        return voteLogRepository.findByElectionIdIn(electionIds).stream()
+                .map(VoteLog::getVoterId)
+                .collect(Collectors.toSet());
+    }
+
+    // programCourses null/empty => consider every active program in scope.
+    public Set<UUID> resolveDepartmentVotedVoterIds(UUID campusId, List<String> programCourses) {
+        List<UUID> campusIds = campusId != null
+                ? List.of(campusId)
+                : campusRepository.findAll().stream().map(Campus::getId).toList();
+
+        Set<UUID> electionIds = new HashSet<>();
+        for (UUID cid : campusIds) {
+            List<String> programs = (programCourses == null || programCourses.isEmpty())
+                    ? voterRepository.findDistinctPrograms(RecordStatus.ACTIVE, cid)
+                    : programCourses;
+
+            for (String program : programs) {
+                Voter probe = new Voter();
+                probe.setCampusId(cid);
+                probe.setProgramCourse(program);
+                voterDepartmentElectionService.resolveElectionForStatus(probe)
+                        .ifPresent(e -> electionIds.add(e.getId()));
+            }
+        }
+        if (electionIds.isEmpty()) return Set.of();
+
+        return voteLogRepository.findByElectionIdIn(electionIds).stream()
+                .map(VoteLog::getVoterId)
+                .collect(Collectors.toSet());
     }
 }

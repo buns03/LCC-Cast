@@ -1,5 +1,3 @@
-
-
 <!doctype html>
 <html lang="en" xmlns:th="http://www.w3.org/1999/xhtml">
   <head>
@@ -12,7 +10,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <title>Settings | LCCast</title>
+    <title>LCC Cast | Settings</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
 
     <!-- BASE CSS -->
     <link rel="stylesheet" href="/css/base.css" />
@@ -21,6 +23,7 @@
     <link rel="stylesheet" href="/css/forms.css" />
     <link rel="stylesheet" href="/css/modal.css" />
     <link rel="stylesheet" href="/css/navigation.css" />
+    <link rel="stylesheet" href="/css/password-rules.css" />
 
     <!-- BOOTSTRAP ICONS -->
     <link
@@ -56,7 +59,7 @@ SIDEBAR
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-top">
         <div class="logo">
-          <img src="/images/lcccast_logo.png" alt="LCCast" />
+          <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
           <h2 >LCC Cast</h2>
         </div>
@@ -184,11 +187,11 @@ SIDEBAR
           <span>Admin Accounts</span>
         </button>
 
-        <button type="button" class="settings-tab" data-tab="systemSettings">
-          <i class="bi bi-sliders"></i>
+<!--        <button type="button" class="settings-tab" data-tab="systemSettings">-->
+<!--          <i class="bi bi-sliders"></i>-->
 
-          <span>System Settings</span>
-        </button>
+<!--          <span>System Settings</span>-->
+<!--        </button>-->
 
         <button type="button" class="settings-tab" data-tab="securitySettings">
           <i class="bi bi-shield-lock"></i>
@@ -309,7 +312,7 @@ SIDEBAR
                   <select id="adminCampus" name="campus" required>
                     <option value="" disabled selected>Select Campus</option>
 
-                    <option value="College">College</option>
+                    <option value="Kaypian">Kaypian</option>
 
                     <option value="Muzon">Muzon</option>
 
@@ -400,6 +403,8 @@ SIDEBAR
                     </button>
                   </div>
 
+                  <small id="adminPasswordStrength" class="password-strength-message"></small>
+
                   <small class="field-error"> This field is required. </small>
                 </div>
 
@@ -446,7 +451,7 @@ SIDEBAR
                   <span>Discard</span>
                 </button>
 
-                <button type="submit" class="save-btn">
+                <button type="submit" class="save-btn" id="addAdminSubmitBtn">
                   <i class="bi bi-person-plus"></i>
 
                   <span>Add Admin</span>
@@ -543,7 +548,7 @@ SIDEBAR
                         >
                           <option value="">All Campuses</option>
 
-                          <option value="College">College</option>
+                          <option value="Kaypian">Kaypian</option>
 
                           <option value="Muzon">Muzon</option>
                         </select>
@@ -672,122 +677,122 @@ SIDEBAR
          SYSTEM SETTINGS
     ====================================================== -->
 
-      <section id="systemSettings" class="settings-panel">
-        <div class="settings-card">
-          <div class="settings-card-header">
-            <h2>
-              <i class="bi bi-sliders"></i>
+<!--      <section id="systemSettings" class="settings-panel">-->
+<!--        <div class="settings-card">-->
+<!--          <div class="settings-card-header">-->
+<!--            <h2>-->
+<!--              <i class="bi bi-sliders"></i>-->
 
-              System Settings
-            </h2>
+<!--              System Settings-->
+<!--            </h2>-->
 
-            <p>Configure general LCCast system behavior.</p>
-          </div>
+<!--            <p>Configure general LCC Cast system behavior.</p>-->
+<!--          </div>-->
 
-          <form class="system-form" novalidate>
-            <!-- SYSTEM LOGO -->
+<!--          <form class="system-form" novalidate>-->
+<!--            &lt;!&ndash; SYSTEM LOGO &ndash;&gt;-->
 
-            <div class="system-logo-settings">
-              <div class="form-group">
-                <label>System Logo</label>
+<!--            <div class="system-logo-settings">-->
+<!--              <div class="form-group">-->
+<!--                <label>System Logo</label>-->
 
-                <div class="system-logo-row">
+<!--                <div class="system-logo-row">-->
 
-                  <div class="system-logo-preview">
-                    <img
-                            id="systemLogoPreview"
-                            src="/images/logo.png"
-                            alt="System Logo"
-                    />
-                  </div>
+<!--                  <div class="system-logo-preview">-->
+<!--                    <img-->
+<!--                            id="systemLogoPreview"-->
+<!--                            src="/images/logo.png"-->
+<!--                            alt="System Logo"-->
+<!--                    />-->
+<!--                  </div>-->
 
-                  <input
-                          type="file"
-                          id="systemLogoInput"
-                          accept="image/png,image/jpeg,image/webp"
-                          hidden
-                  />
+<!--                  <input-->
+<!--                          type="file"-->
+<!--                          id="systemLogoInput"-->
+<!--                          accept="image/png,image/jpeg,image/webp"-->
+<!--                          hidden-->
+<!--                  />-->
 
-                  <button
-                          type="button"
-                          class="save-btn"
-                          id="changeLogoBtn"
-                  >
-                    <i class="bi bi-upload"></i>
-                    Change Logo
-                  </button>
+<!--                  <button-->
+<!--                          type="button"-->
+<!--                          class="save-btn"-->
+<!--                          id="changeLogoBtn"-->
+<!--                  >-->
+<!--                    <i class="bi bi-upload"></i>-->
+<!--                    Change Logo-->
+<!--                  </button>-->
 
-                </div>
+<!--                </div>-->
 
-                <small class="field-error" id="logoError"></small>
-              </div>
-            </div>
+<!--                <small class="field-error" id="logoError"></small>-->
+<!--              </div>-->
+<!--            </div>-->
 
 
-            <div class="form-grid">
-              <div class="form-group">
-                <label for="systemName"> System Name </label>
+<!--            <div class="form-grid">-->
+<!--              <div class="form-group">-->
+<!--                <label for="systemName"> System Name </label>-->
 
-                <input type="text" id="systemName" name="systemName" value="LCCast" required />
+<!--                <input type="text" id="systemName" name="systemName" value="LCC Cast" required />-->
 
-                <small class="field-error"> This field is required. </small>
-              </div>
+<!--                <small class="field-error"> This field is required. </small>-->
+<!--              </div>-->
 
-              <div class="form-group">
-                <label for="academicYear"> Academic Year </label>
+<!--              <div class="form-group">-->
+<!--                <label for="academicYear"> Academic Year </label>-->
 
-                <select id="academicYear" name="academicYear" required>
-                  <option value="2026 - 2027" selected>2026 - 2027</option>
+<!--                <select id="academicYear" name="academicYear" required>-->
+<!--                  <option value="2026 - 2027" selected>2026 - 2027</option>-->
 
-                  <option value="2027 - 2028">2027 - 2028</option>
-                </select>
+<!--                  <option value="2027 - 2028">2027 - 2028</option>-->
+<!--                </select>-->
 
-                <small class="field-error"> This field is required. </small>
-              </div>
-            </div>
+<!--                <small class="field-error"> This field is required. </small>-->
+<!--              </div>-->
+<!--            </div>-->
 
-            <div class="form-group">
-              <label for="systemDescription"> System Description </label>
+<!--            <div class="form-group">-->
+<!--              <label for="systemDescription"> System Description </label>-->
 
-              <textarea id="systemDescription" name="systemDescription">LCCast Student Voting System</textarea>
-            </div>
+<!--              <textarea id="systemDescription" name="systemDescription">LCC Cast Student Voting System</textarea>-->
+<!--            </div>-->
 
-            <div class="system-options">
-<!--              <label class="setting-toggle">-->
-<!--                <span>-->
-<!--                  <strong>Allow Voting</strong>-->
+<!--            <div class="system-options">-->
+<!--&lt;!&ndash;              <label class="setting-toggle">&ndash;&gt;-->
+<!--&lt;!&ndash;                <span>&ndash;&gt;-->
+<!--&lt;!&ndash;                  <strong>Allow Voting</strong>&ndash;&gt;-->
 
-<!--                  <small> Allow eligible voters to cast their votes. </small>-->
-<!--                </span>-->
+<!--&lt;!&ndash;                  <small> Allow eligible voters to cast their votes. </small>&ndash;&gt;-->
+<!--&lt;!&ndash;                </span>&ndash;&gt;-->
 
-<!--                <input type="checkbox" checked />-->
+<!--&lt;!&ndash;                <input type="checkbox" checked />&ndash;&gt;-->
 
-<!--                <span class="toggle-slider"></span>-->
-<!--              </label>-->
+<!--&lt;!&ndash;                <span class="toggle-slider"></span>&ndash;&gt;-->
+<!--&lt;!&ndash;              </label>&ndash;&gt;-->
 
-<!--              <label class="setting-toggle">-->
-<!--                <span>-->
-<!--                  <strong>Show Election Results</strong>-->
+<!--&lt;!&ndash;              <label class="setting-toggle">&ndash;&gt;-->
+<!--&lt;!&ndash;                <span>&ndash;&gt;-->
+<!--&lt;!&ndash;                  <strong>Show Election Results</strong>&ndash;&gt;-->
 
-<!--                  <small> Allow authorized users to view results. </small>-->
-<!--                </span>-->
+<!--&lt;!&ndash;                  <small> Allow authorized users to view results. </small>&ndash;&gt;-->
+<!--&lt;!&ndash;                </span>&ndash;&gt;-->
 
-<!--                <input type="checkbox" />-->
+<!--&lt;!&ndash;                <input type="checkbox" />&ndash;&gt;-->
 
-<!--                <span class="toggle-slider"></span>-->
-<!--              </label>-->
-            </div>
+<!--&lt;!&ndash;                <span class="toggle-slider"></span>&ndash;&gt;-->
+<!--&lt;!&ndash;              </label>&ndash;&gt;-->
+<!--            </div>-->
 
-            <div class="settings-form-actions">
-              <button type="button" class="discard-btn discard-form-btn">
-                Discard
-              </button>
+<!--            <div class="settings-form-actions">-->
+<!--              <button type="button" class="discard-btn discard-form-btn">-->
+<!--                Discard-->
+<!--              </button>-->
 
-              <button type="submit" class="save-btn">Save Changes</button>
-            </div>
-          </form>
-        </div>
-      </section>
+<!--              <button type="submit" class="save-btn">Save Changes</button>-->
+<!--            </div>-->
+<!--          </form>-->
+<!--        </div>-->
+<!--      </section>-->
 
       <!-- =====================================================
          SECURITY
@@ -838,6 +843,8 @@ SIDEBAR
                     <i class="bi bi-eye"></i>
                   </button>
                 </div>
+
+                <small id="securityNewPasswordStrength" class="password-strength-message"></small>
 
                 <small class="field-error password-same-error">
                   <span class="required-message">
@@ -914,7 +921,7 @@ SIDEBAR
                 Discard
               </button>
 
-              <button type="submit" class="save-btn">Update Security</button>
+              <button type="submit" class="save-btn" id="updateSecurityBtn">Update Security</button>
             </div>
           </form>
         </div>
@@ -1226,7 +1233,7 @@ SIDEBAR
 
           <h2>Logout?</h2>
 
-          <p>Are you sure you want to logout from LCCast?</p>
+          <p>Are you sure you want to logout from LCC Cast?</p>
         </div>
 
         <div class="modal-footer">
@@ -1310,10 +1317,12 @@ SIDEBAR
     <i class="bi bi-x"></i>
   </button>
 </div>
+    <script src="/js/superadmin/soft-cache.js"></script>
 
     <script src="/js/navigation.js"></script>
 
     <script src="/js/superadmin/settings.js"></script>
+    <script src="/js/password-rules.js"></script>
     <script src="/js/logout.js"></script>
   </body>
 </html>

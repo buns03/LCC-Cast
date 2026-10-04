@@ -13,7 +13,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
 
-    <title>Settings | LCCast</title>
+    <title>LCC Cast | Settings</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
 
     <!-- SHARED CSS -->
     <link rel="stylesheet" href="/css/base.css" />
@@ -22,6 +26,7 @@
     <link rel="stylesheet" href="/css/forms.css" />
     <link rel="stylesheet" href="/css/modal.css" />
     <link rel="stylesheet" href="/css/navigation.css" />
+    <link rel="stylesheet" href="/css/password-rules.css" />
 
     <!-- PAGE CSS -->
     <link rel="stylesheet" href="/css/voter/voter-settings.css" />
@@ -57,7 +62,7 @@
 <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
         <div class="logo">
-            <img src="/images/lcccast_logo.png" alt="LCCast" />
+            <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
             <h2>LCC Cast</h2>
         </div>
@@ -347,6 +352,8 @@
                                         </button>
                                     </div>
 
+                                    <small id="newPasswordStrength" class="password-strength-message"></small>
+
                                     <small class="field-error">
                                         Please enter a new password.
                                     </small>
@@ -430,7 +437,7 @@
 
             <h2>Logout?</h2>
 
-            <p>Are you sure you want to logout from LCCast?</p>
+            <p>Are you sure you want to logout from LCC Cast?</p>
         </div>
 
         <div class="modal-footer">
@@ -540,9 +547,10 @@
 <!-- =========================================================
      JAVASCRIPT
 ========================================================== -->
-
+<script src="/js/superadmin/soft-cache.js"></script>
 <script src="/js/navigation.js"></script>
 <script src="/js/logout.js"></script>
+<script src="/js/password-rules.js"></script>
 <script src="/js/admin-ssc/settings.js"></script>
 </body>
 </html>

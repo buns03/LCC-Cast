@@ -22,4 +22,8 @@ public interface UserProfileRepository
     boolean existsBySchoolId(String schoolId);
 
     List<UserProfile> findByRole(UserRole role);
+
+    Optional<UserProfile> findByEmailIgnoreCase(String email);
+
+
 }

@@ -20,9 +20,13 @@
 }
 
 .no-election-message {
-  padding: 16px;
+  padding: 28px 16px;
+  text-align: center;
   color: #64748B;
-  font-style: italic;
+  font-size: 14px;
+  background: #FAFBFE;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
 }
 
 .analytics-tab {
@@ -1701,6 +1705,18 @@
 
     }
 
+    .campus-election-title h2 {
+        font-size: 15.5px;
+    }
+
+    .analytics-card-header h3 {
+        font-size: 15.5px;
+    }
+
+    .selected-department-heading h2 {
+        font-size: 20px;
+    }
+
 }
 
 @media(max-width:650px) {
@@ -1865,6 +1881,15 @@
 
     }
 
+    .campus-election-title h2 {
+        font-size: 15.5px;
+    }
 
+    .analytics-card-header h3 {
+        font-size: 15.5px;
+    }
 
+    .selected-department-heading h2 {
+        font-size: 20px;
+    }
 }

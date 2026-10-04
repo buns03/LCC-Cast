@@ -51,6 +51,11 @@ public class SuperadminHistoryApiController {
     // ACTIONS (AUDIT LOGS)
     // ==================================================
 
+    @GetMapping("/actions/filter-options")
+    public List<String> actionFilterOptions() {
+        return historyService.getActionFilterOptions();
+    }
+
     @GetMapping("/actions")
     public PageResponse<AuditLogDTO> actions(
             @RequestParam(required = false) String search,
@@ -75,6 +80,11 @@ public class SuperadminHistoryApiController {
             @RequestParam(required = false, defaultValue = "1") int page
     ) {
         return historyService.getArchives(search, type, page);
+    }
+
+    @GetMapping("/archives/{id}/details")
+    public Map<String, Object> archiveDetails(@PathVariable UUID id) {
+        return historyService.getArchiveDetails(id);
     }
 
     @PostMapping("/archives/{id}/restore")

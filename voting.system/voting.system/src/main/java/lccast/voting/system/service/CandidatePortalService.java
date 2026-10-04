@@ -11,22 +11,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/**
- * ASSUMPTIONS (Candidate.java, PartylistMember.java, DepartmentMember.java,
- * Partylist.java, Department.java, and their repositories were not shared —
- * field names below follow your Supabase schema 1:1 using the same camelCase
- * convention Voter.java uses, e.g. campaign_image_url -> campaignImageUrl):
- *  - Candidate: id, studentId, lastName, firstName, middleName, position,
- *    photoImageUrl, backgroundImageUrl, campaignImageUrl, partylistId, departmentId
- *  - PartylistMember: id, partylistId, studentId, lastName, firstName, middleName,
- *    position, photoImageUrl, backgroundImageUrl, campaignImageUrl
- *  - DepartmentMember: id, departmentId, studentId, lastName, firstName, middleName,
- *    position, photoImageUrl, backgroundImageUrl, campaignImageUrl
- *  - Partylist: id, name, description, posterImageUrl, posterLogoUrl, schoolYear
- *  - Department: id, name, description, posterImageUrl, posterLogoUrl, schoolYear
- *
- * Required additive repository methods are listed in repository-additions.txt.
- */
 @Service
 public class CandidatePortalService {
 
@@ -56,6 +40,28 @@ public class CandidatePortalService {
     }
 
     // =====================================================
+    // CANDIDATE TYPE — a student can be BOTH at once, and
+    // their images are never shared across the two.
+    // =====================================================
+
+    public enum CandidateType { SSC, DEPARTMENT }
+
+    public static class CandidacyStatus {
+        public boolean ssc;
+        public boolean department;
+    }
+
+    public CandidacyStatus getCandidacyStatus(UUID authUserId) {
+        CandidacyStatus status = new CandidacyStatus();
+        Voter voter = voterRepository.findByAuthUserId(authUserId).orElse(null);
+        if (voter == null) return status;
+
+        status.ssc = findRecordByStudentId(voter.getStudentId(), CandidateType.SSC) != null;
+        status.department = findRecordByStudentId(voter.getStudentId(), CandidateType.DEPARTMENT) != null;
+        return status;
+    }
+
+    // =====================================================
     // LOOKUP
     // =====================================================
 
@@ -80,27 +86,52 @@ public class CandidatePortalService {
         }
     }
 
-    public CandidateRecord findRecordByAuthUserId(UUID authUserId) {
+    public CandidateRecord findRecordByAuthUserId(UUID authUserId, CandidateType type) {
         if (authUserId == null) return null;
         Voter voter = voterRepository.findByAuthUserId(authUserId).orElse(null);
         if (voter == null) return null;
-        return findRecordByStudentId(voter.getStudentId());
+        return findRecordByStudentId(voter.getStudentId(), type);
     }
 
-    private CandidateRecord findRecordByStudentId(String studentId) {
+    public String findAvatarStoragePath(UUID authUserId) {
+        if (authUserId == null) return null;
+
+        CandidateRecord record = findRecordByAuthUserId(authUserId, CandidateType.SSC);
+        if (record == null || record.photoImageUrl == null) {
+            CandidateRecord deptRecord = findRecordByAuthUserId(authUserId, CandidateType.DEPARTMENT);
+            if (deptRecord != null && deptRecord.photoImageUrl != null) {
+                record = deptRecord;
+            }
+        }
+
+        return (record != null) ? record.photoImageUrl : null;
+    }
+
+    private CandidateRecord findRecordByStudentId(String studentId, CandidateType type) {
         if (studentId == null || studentId.isBlank()) return null;
 
-        Candidate c = candidateRepository.findAllByStudentId(studentId)
-                .stream().findFirst().orElse(null);
-        if (c != null) return toRecord(c);
+        if (type == CandidateType.SSC) {
+            PartylistMember pm = partylistMemberRepository.findAllByStudentId(studentId)
+                    .stream().findFirst().orElse(null);
+            if (pm != null) return toRecord(pm);
 
-        PartylistMember pm = partylistMemberRepository.findAllByStudentId(studentId)
-                .stream().findFirst().orElse(null);
-        if (pm != null) return toRecord(pm);
+            Candidate c = candidateRepository.findAllByStudentId(studentId).stream()
+                    .filter(x -> x.getPartylistId() != null)
+                    .findFirst().orElse(null);
+            if (c != null) return toRecord(c);
 
+            return null;
+        }
+
+        // DEPARTMENT
         DepartmentMember dm = departmentMemberRepository.findByStudentId(studentId)
                 .stream().findFirst().orElse(null);
         if (dm != null) return toRecord(dm);
+
+        Candidate c = candidateRepository.findAllByStudentId(studentId).stream()
+                .filter(x -> x.getDepartmentId() != null)
+                .findFirst().orElse(null);
+        if (c != null) return toRecord(c);
 
         return null;
     }
@@ -156,10 +187,12 @@ public class CandidatePortalService {
 
     // =====================================================
     // PERSONAL IMAGE UPLOAD (photo / background / campaign)
+    // Scoped to ONE candidate type only — SSC uploads never
+    // touch department rows, and vice versa.
     // =====================================================
 
     @Transactional
-    public String uploadPersonalImage(UUID authUserId, String imageType, MultipartFile file) throws IOException {
+    public String uploadPersonalImage(UUID authUserId, CandidateType type, String imageType, MultipartFile file) throws IOException {
         if (!List.of("photo", "background", "campaign").contains(imageType)) {
             throw new IllegalArgumentException("Invalid image type.");
         }
@@ -174,38 +207,52 @@ public class CandidatePortalService {
 
         boolean updatedAny = false;
 
-        // Write to EVERY row for this studentId across all three tables,
-        // not just the first one found — a student can have a row in more
-        // than one place, and each is read directly by a different page.
-        List<Candidate> candidates = candidateRepository.findAllByStudentId(studentId);
-        for (Candidate c : candidates) {
-            applyImage(c, imageType, storagePath);
-        }
-        if (!candidates.isEmpty()) {
-            candidateRepository.saveAll(candidates);
-            updatedAny = true;
-        }
+        if (type == CandidateType.SSC) {
+            List<PartylistMember> partylistMembers = partylistMemberRepository.findAllByStudentId(studentId);
+            for (PartylistMember pm : partylistMembers) {
+                applyImage(pm, imageType, storagePath);
+            }
+            if (!partylistMembers.isEmpty()) {
+                partylistMemberRepository.saveAll(partylistMembers);
+                updatedAny = true;
+            }
 
-        List<PartylistMember> partylistMembers = partylistMemberRepository.findAllByStudentId(studentId);
-        for (PartylistMember pm : partylistMembers) {
-            applyImage(pm, imageType, storagePath);
-        }
-        if (!partylistMembers.isEmpty()) {
-            partylistMemberRepository.saveAll(partylistMembers);
-            updatedAny = true;
-        }
+            List<Candidate> sscCandidates = candidateRepository.findAllByStudentId(studentId).stream()
+                    .filter(c -> c.getPartylistId() != null)
+                    .collect(Collectors.toList());
+            for (Candidate c : sscCandidates) {
+                applyImage(c, imageType, storagePath);
+            }
+            if (!sscCandidates.isEmpty()) {
+                candidateRepository.saveAll(sscCandidates);
+                updatedAny = true;
+            }
+        } else {
+            List<DepartmentMember> departmentMembers = departmentMemberRepository.findByStudentId(studentId);
+            for (DepartmentMember dm : departmentMembers) {
+                applyImage(dm, imageType, storagePath);
+            }
+            if (!departmentMembers.isEmpty()) {
+                departmentMemberRepository.saveAll(departmentMembers);
+                updatedAny = true;
+            }
 
-        List<DepartmentMember> departmentMembers = departmentMemberRepository.findByStudentId(studentId);
-        for (DepartmentMember dm : departmentMembers) {
-            applyImage(dm, imageType, storagePath);
-        }
-        if (!departmentMembers.isEmpty()) {
-            departmentMemberRepository.saveAll(departmentMembers);
-            updatedAny = true;
+            List<Candidate> deptCandidates = candidateRepository.findAllByStudentId(studentId).stream()
+                    .filter(c -> c.getDepartmentId() != null)
+                    .collect(Collectors.toList());
+            for (Candidate c : deptCandidates) {
+                applyImage(c, imageType, storagePath);
+            }
+            if (!deptCandidates.isEmpty()) {
+                candidateRepository.saveAll(deptCandidates);
+                updatedAny = true;
+            }
         }
 
         if (!updatedAny) {
-            throw new IllegalStateException("No candidate record found for this account.");
+            throw new IllegalStateException(
+                    "No " + (type == CandidateType.SSC ? "SSC partylist" : "department") +
+                            " candidate record found for this account.");
         }
 
         return storagePath;
@@ -218,7 +265,6 @@ public class CandidatePortalService {
             case "campaign" -> c.setCampaignImageUrl(path);
         }
     }
-
 
     private void applyImage(PartylistMember pm, String imageType, String path) {
         switch (imageType) {
@@ -238,7 +284,9 @@ public class CandidatePortalService {
 
     // =====================================================
     // CROSS-TABLE IMAGE LOOKUP (used by PartylistService /
-    // DepartmentService when seeding a new member row)
+    // DepartmentService when seeding a new member row) —
+    // now scoped by type so an SSC image can never seed a
+    // department row, and vice versa.
     // =====================================================
 
     public static class ExistingImages {
@@ -247,19 +295,26 @@ public class CandidatePortalService {
         public String campaignImageUrl;
     }
 
-    public ExistingImages findExistingImages(String studentId) {
+    public ExistingImages findExistingImages(String studentId, CandidateType type) {
         if (studentId == null || studentId.isBlank()) return null;
 
-        Candidate c = candidateRepository.findAllByStudentId(studentId).stream().findFirst().orElse(null);
-        if (c != null && hasAnyImage(c.getPhotoImageUrl(), c.getBackgroundImageUrl(), c.getCampaignImageUrl())) {
-            return toImages(c.getPhotoImageUrl(), c.getBackgroundImageUrl(), c.getCampaignImageUrl());
-        }
+        if (type == CandidateType.SSC) {
+            PartylistMember pm = partylistMemberRepository.findAllByStudentId(studentId).stream()
+                    .filter(m -> hasAnyImage(m.getPhotoImageUrl(), m.getBackgroundImageUrl(), m.getCampaignImageUrl()))
+                    .findFirst().orElse(null);
+            if (pm != null) {
+                return toImages(pm.getPhotoImageUrl(), pm.getBackgroundImageUrl(), pm.getCampaignImageUrl());
+            }
 
-        PartylistMember pm = partylistMemberRepository.findAllByStudentId(studentId).stream()
-                .filter(m -> hasAnyImage(m.getPhotoImageUrl(), m.getBackgroundImageUrl(), m.getCampaignImageUrl()))
-                .findFirst().orElse(null);
-        if (pm != null) {
-            return toImages(pm.getPhotoImageUrl(), pm.getBackgroundImageUrl(), pm.getCampaignImageUrl());
+            Candidate c = candidateRepository.findAllByStudentId(studentId).stream()
+                    .filter(x -> x.getPartylistId() != null)
+                    .filter(x -> hasAnyImage(x.getPhotoImageUrl(), x.getBackgroundImageUrl(), x.getCampaignImageUrl()))
+                    .findFirst().orElse(null);
+            if (c != null) {
+                return toImages(c.getPhotoImageUrl(), c.getBackgroundImageUrl(), c.getCampaignImageUrl());
+            }
+
+            return null;
         }
 
         DepartmentMember dm = departmentMemberRepository.findByStudentId(studentId).stream()
@@ -267,6 +322,14 @@ public class CandidatePortalService {
                 .findFirst().orElse(null);
         if (dm != null) {
             return toImages(dm.getPhotoImageUrl(), dm.getBackgroundImageUrl(), dm.getCampaignImageUrl());
+        }
+
+        Candidate c = candidateRepository.findAllByStudentId(studentId).stream()
+                .filter(x -> x.getDepartmentId() != null)
+                .filter(x -> hasAnyImage(x.getPhotoImageUrl(), x.getBackgroundImageUrl(), x.getCampaignImageUrl()))
+                .findFirst().orElse(null);
+        if (c != null) {
+            return toImages(c.getPhotoImageUrl(), c.getBackgroundImageUrl(), c.getCampaignImageUrl());
         }
 
         return null;
@@ -284,9 +347,8 @@ public class CandidatePortalService {
         return img;
     }
 
-
     // =====================================================
-    // GROUP (PARTYLIST / DEPARTMENT) INFO
+    // GROUP (PARTYLIST / DEPARTMENT) INFO — scoped by type
     // =====================================================
 
     public static class GroupMember {
@@ -307,16 +369,23 @@ public class CandidatePortalService {
         public List<GroupMember> members;
     }
 
-    public GroupInfo getGroupInfo(UUID authUserId) {
-        CandidateRecord record = findRecordByAuthUserId(authUserId);
+    public GroupInfo getGroupInfo(UUID authUserId, CandidateType type) {
+        CandidateRecord record = findRecordByAuthUserId(authUserId, type);
         if (record == null) {
-            throw new IllegalStateException("No candidate record found for this account.");
+            throw new IllegalStateException(
+                    type == CandidateType.SSC
+                            ? "You are not currently part of any SSC partylist."
+                            : "You are not currently part of any department group.");
         }
 
         GroupInfo info = new GroupInfo();
         info.canEdit = record.isPresident();
 
-        if (record.partylistId != null) {
+        if (type == CandidateType.SSC) {
+            if (record.partylistId == null) {
+                throw new IllegalStateException("This SSC candidate is not linked to a partylist.");
+            }
+
             Partylist p = partylistRepository.findById(record.partylistId)
                     .orElseThrow(() -> new IllegalStateException("Partylist not found."));
 
@@ -341,46 +410,54 @@ public class CandidatePortalService {
             return info;
         }
 
-        if (record.departmentId != null) {
-            Department d = departmentRepository.findById(record.departmentId)
-                    .orElseThrow(() -> new IllegalStateException("Department not found."));
-
-            info.groupType = "DEPARTMENT";
-            info.groupId = d.getId();
-            info.name = d.getName();
-            info.description = d.getDescription();
-            info.posterImageUrl = d.getPosterImageUrl();
-            info.posterLogoUrl = d.getPosterLogoUrl();
-            info.schoolYear = d.getSchoolYear();
-
-            info.members = departmentMemberRepository.findByDepartmentId(record.departmentId).stream()
-                    .map(m -> {
-                        GroupMember gm = new GroupMember();
-                        gm.fullName = joinName(m.getFirstName(), m.getMiddleName(), m.getLastName());
-                        gm.position = m.getPosition();
-                        gm.photoImageUrl = m.getPhotoImageUrl();
-                        return gm;
-                    })
-                    .collect(Collectors.toList());
-
-            return info;
+        // DEPARTMENT
+        if (record.departmentId == null) {
+            throw new IllegalStateException("This candidate is not linked to a department.");
         }
 
-        throw new IllegalStateException("This candidate is not linked to a partylist or department.");
+        Department d = departmentRepository.findById(record.departmentId)
+                .orElseThrow(() -> new IllegalStateException("Department not found."));
+
+        info.groupType = "DEPARTMENT";
+        info.groupId = d.getId();
+        info.name = d.getName();
+        info.description = d.getDescription();
+        info.posterImageUrl = d.getPosterImageUrl();
+        info.posterLogoUrl = d.getPosterLogoUrl();
+        info.schoolYear = d.getSchoolYear();
+
+        info.members = departmentMemberRepository.findByDepartmentId(record.departmentId).stream()
+                .map(m -> {
+                    GroupMember gm = new GroupMember();
+                    gm.fullName = joinName(m.getFirstName(), m.getMiddleName(), m.getLastName());
+                    gm.position = m.getPosition();
+                    gm.photoImageUrl = m.getPhotoImageUrl();
+                    return gm;
+                })
+                .collect(Collectors.toList());
+
+        return info;
     }
 
     @Transactional
-    public void updateGroupInfo(UUID authUserId, String description, MultipartFile poster, MultipartFile logo) throws IOException {
-        CandidateRecord record = findRecordByAuthUserId(authUserId);
+    public void updateGroupInfo(UUID authUserId, CandidateType type, String description, MultipartFile poster, MultipartFile logo) throws IOException {
+        CandidateRecord record = findRecordByAuthUserId(authUserId, type);
         if (record == null) {
-            throw new IllegalStateException("No candidate record found for this account.");
+            throw new IllegalStateException(
+                    type == CandidateType.SSC
+                            ? "You are not currently part of any SSC partylist."
+                            : "You are not currently part of any department group.");
         }
 
         if (!record.isPresident()) {
             throw new IllegalArgumentException("Only the President can update this information.");
         }
 
-        if (record.partylistId != null) {
+        if (type == CandidateType.SSC) {
+            if (record.partylistId == null) {
+                throw new IllegalStateException("This SSC candidate is not linked to a partylist.");
+            }
+
             Partylist p = partylistRepository.findById(record.partylistId)
                     .orElseThrow(() -> new IllegalStateException("Partylist not found."));
 
@@ -392,19 +469,19 @@ public class CandidatePortalService {
             return;
         }
 
-        if (record.departmentId != null) {
-            Department d = departmentRepository.findById(record.departmentId)
-                    .orElseThrow(() -> new IllegalStateException("Department not found."));
-
-            if (description != null) d.setDescription(description);
-            if (poster != null && !poster.isEmpty()) d.setPosterImageUrl(storageService.uploadFile(poster, "poster"));
-            if (logo != null && !logo.isEmpty()) d.setPosterLogoUrl(storageService.uploadFile(logo, "logo"));
-
-            departmentRepository.save(d);
-            return;
+        // DEPARTMENT
+        if (record.departmentId == null) {
+            throw new IllegalStateException("This candidate is not linked to a department.");
         }
 
-        throw new IllegalStateException("This candidate is not linked to a partylist or department.");
+        Department d = departmentRepository.findById(record.departmentId)
+                .orElseThrow(() -> new IllegalStateException("Department not found."));
+
+        if (description != null) d.setDescription(description);
+        if (poster != null && !poster.isEmpty()) d.setPosterImageUrl(storageService.uploadFile(poster, "poster"));
+        if (logo != null && !logo.isEmpty()) d.setPosterLogoUrl(storageService.uploadFile(logo, "logo"));
+
+        departmentRepository.save(d);
     }
 
     private String joinName(String first, String middle, String last) {

@@ -6,6 +6,7 @@ import lccast.voting.system.model.UserProfile;
 import lccast.voting.system.model.Voter;
 import lccast.voting.system.repository.UserProfileRepository;
 import lccast.voting.system.repository.VoterRepository;
+import lccast.voting.system.service.CandidatePortalService;
 import lccast.voting.system.service.SupabaseAuthResponse;
 import lccast.voting.system.service.SupabaseAuthService;
 
@@ -14,6 +15,8 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
 
@@ -24,15 +27,18 @@ public class SettingsController {
     private final SupabaseAuthService supabaseAuthService;
     private final UserProfileRepository userProfileRepository;
     private final VoterRepository voterRepository;
+    private final CandidatePortalService candidatePortalService;
 
     public SettingsController(
             SupabaseAuthService supabaseAuthService,
             UserProfileRepository userProfileRepository,
-            VoterRepository voterRepository) {
+            VoterRepository voterRepository,
+            CandidatePortalService candidatePortalService) {
 
         this.supabaseAuthService = supabaseAuthService;
         this.userProfileRepository = userProfileRepository;
         this.voterRepository = voterRepository;
+        this.candidatePortalService = candidatePortalService;
     }
 
     // =====================================================
@@ -76,8 +82,20 @@ public class SettingsController {
         model.addAttribute("programCourse", programCourse);
         model.addAttribute("campus", campus);
         model.addAttribute("email", email);
+        model.addAttribute("avatarUrl", resolveAvatarUrl((String) session.getAttribute("userId"))); // ADD
 
         return "voter/settings.html";
+    }
+
+    private String resolveAvatarUrl(String authUserIdStr) {
+        if (authUserIdStr == null) {
+            return null;
+        }
+        String storagePath = candidatePortalService.findAvatarStoragePath(UUID.fromString(authUserIdStr));
+        if (storagePath == null) {
+            return null;
+        }
+        return "/api/storage/file?path=" + URLEncoder.encode(storagePath, StandardCharsets.UTF_8);
     }
 
     // =====================================================
@@ -140,17 +158,34 @@ public class SettingsController {
             }
         }
 
-        SupabaseAuthResponse verifyResponse =
-                supabaseAuthService.login(
-                        currentEmail,
-                        request.getCurrentPassword()
+        if (wantsPasswordChange) {
+
+            String newPassword = request.getNewPassword();
+            String confirmPassword = request.getConfirmPassword();
+
+            if (newPassword == null || newPassword.isBlank() ||
+                    confirmPassword == null ||
+                    !confirmPassword.equals(newPassword)) {
+
+                return ResponseEntity.badRequest().body(
+                        Map.of("message", "New password and confirmation do not match.")
                 );
+            }
 
-        if (verifyResponse == null || verifyResponse.getUser() == null) {
+            UserProfile profile = userProfileRepository.findByAuthUserId(authUserId).orElse(null);
+            if (profile == null || profile.getEmail() == null) {
+                return ResponseEntity.status(404).body(
+                        Map.of("message", "Account login could not be found.")
+                );
+            }
 
-            return ResponseEntity.status(403).body(
-                    Map.of("message", "Current password is incorrect.")
-            );
+            try {
+                supabaseAuthService.login(profile.getEmail(), request.getCurrentPassword());
+            } catch (Exception e) {
+                return ResponseEntity.status(403).body(
+                        Map.of("message", "Current password is incorrect.")
+                );
+            }
         }
 
         if (wantsEmailChange) {

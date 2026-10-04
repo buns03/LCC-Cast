@@ -5,17 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.http.HttpSession;
 import lccast.voting.system.model.*;
-import lccast.voting.system.repository.ArchiveRecordRepository;
-import lccast.voting.system.repository.CampusRepository;
-import lccast.voting.system.repository.DepartmentMemberRepository;
-import lccast.voting.system.repository.DepartmentRepository;
-import lccast.voting.system.repository.VoterRepository;
-import lccast.voting.system.repository.TrashRecordRepository;
+import lccast.voting.system.repository.*;
 import jakarta.servlet.http.HttpServletRequest;
 import lccast.voting.system.service.AuditLogService;
 
 import lccast.voting.system.service.CandidatePortalService;
 import lccast.voting.system.service.CandidateRoleSyncService;
+import lccast.voting.system.service.RealtimeBroadcastService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +34,8 @@ public class DepartmentService {
     private final AuditLogService auditLogService;
     private final CandidateRoleSyncService candidateRoleSyncService;
     private final lccast.voting.system.service.CandidatePortalService candidatePortalService;
+    private final ElectionDepartmentRepository electionDepartmentRepository;
+    private final RealtimeBroadcastService realtime;
 
     public DepartmentService(
             DepartmentRepository departmentRepository,
@@ -49,7 +47,9 @@ public class DepartmentService {
             ObjectMapper objectMapper,
             AuditLogService auditLogService,
             CandidateRoleSyncService candidateRoleSyncService,
-            CandidatePortalService candidatePortalService
+            CandidatePortalService candidatePortalService,
+            ElectionDepartmentRepository electionDepartmentRepository,
+            RealtimeBroadcastService realtime
     ) {
         this.departmentRepository = departmentRepository;
         this.departmentMemberRepository = departmentMemberRepository;
@@ -61,6 +61,8 @@ public class DepartmentService {
         this.auditLogService = auditLogService;
         this.candidateRoleSyncService = candidateRoleSyncService;
         this.candidatePortalService = candidatePortalService;
+        this.electionDepartmentRepository = electionDepartmentRepository;
+        this.realtime = realtime;
     }
 
     // =========================================================
@@ -175,6 +177,24 @@ public class DepartmentService {
                         )
                 );
     }
+
+    private void assertNotLinkedToActiveElection(UUID departmentId) {
+        Instant now = Instant.now();
+
+        boolean linkedToActiveElection = electionDepartmentRepository.findByDepartmentId(departmentId).stream()
+                .map(ElectionDepartment::getElection)
+                .filter(Objects::nonNull)
+                .filter(election -> election.getStatus() == RecordStatus.ACTIVE)
+                .anyMatch(election -> election.getEndAt() == null || !now.isAfter(election.getEndAt()));
+
+        if (linkedToActiveElection) {
+            throw new IllegalStateException(
+                    "This department is part of an active or upcoming election and cannot be archived or deleted. " +
+                            "Archive or delete that election first, or wait until it concludes."
+            );
+        }
+    }
+
 
     public Voter getStudentForDepartmentMemberByCampusAndName(
             String studentId,
@@ -328,6 +348,8 @@ public class DepartmentService {
                 null
         );
 
+        realtime.departmentsChanged(saved.getCampus().getId());
+
         return saved;
     }
 
@@ -480,7 +502,7 @@ public class DepartmentService {
 
         for (String oldId : oldStudentIds) {
             if (!newStudentIds.contains(oldId)) {
-                candidateRoleSyncService.demoteToVoterIfNoLongerCandidate(oldId);
+                candidateRoleSyncService.demoteDepartmentMember(oldId);
             }
         }
 
@@ -488,6 +510,9 @@ public class DepartmentService {
                 request, AuditAction.UPDATE, "Departments", saved.getId(),
                 "Updated department: " + saved.getTitle(), null
         );
+
+        realtime.departmentsChanged(saved.getCampus().getId());
+
         return saved;
     }
 
@@ -635,7 +660,7 @@ public class DepartmentService {
 
             if (member.getPhotoImageUrl() == null && member.getBackgroundImageUrl() == null
                     && member.getCampaignImageUrl() == null) {
-                var existing = candidatePortalService.findExistingImages(voter.getStudentId());
+                var existing = candidatePortalService.findExistingImages(voter.getStudentId(), CandidatePortalService.CandidateType.DEPARTMENT);
                 if (existing != null) {
                     member.setPhotoImageUrl(existing.photoImageUrl);
                     member.setBackgroundImageUrl(existing.backgroundImageUrl);
@@ -705,100 +730,80 @@ public class DepartmentService {
     // ARCHIVE
     // =========================================================
 
-    public void archive(
-            UUID id,
-            HttpServletRequest request
-    ) {
-
+    public void archive(UUID id, HttpServletRequest request) {
         Department department = getById(id);
-
         if (department.getStatus() != RecordStatus.ACTIVE) {
-            throw new RuntimeException(
-                    "Only active departments can be archived"
-            );
+            throw new RuntimeException("Only active departments can be archived");
         }
+
+        assertNotLinkedToActiveElection(id); // ADD
 
         createArchiveRecord(department, request);
 
-        department.setStatus(
-                RecordStatus.ARCHIVED
-        );
+        List<String> memberStudentIds = departmentMemberRepository.findByDepartmentId(id).stream()
+                .map(DepartmentMember::getStudentId)
+                .toList();
 
+        department.setStatus(RecordStatus.ARCHIVED);
         departmentRepository.save(department);
 
-        auditLogService.log(
-                request,
-                AuditAction.ARCHIVE,
-                "Departments",
-                department.getId(),
-                "Archived department: " +
-                        department.getTitle(),
-                null
-        );
+        candidateRoleSyncService.demoteDepartmentMembers(memberStudentIds);
+
+        auditLogService.log(request, AuditAction.ARCHIVE, "Departments", department.getId(),
+                "Archived department: " + department.getTitle(), null);
+
+        realtime.departmentsChanged(department.getCampus().getId());
+        realtime.historyChanged("archives");
     }
 
-    // =========================================================
-    // DELETE / TRASH
-    // =========================================================
-
-    public void delete(
-            UUID id,
-            HttpServletRequest request
-    ) {
-
+    public void delete(UUID id, HttpServletRequest request) {
         Department department = getById(id);
-
-        if (department.getStatus() ==
-                RecordStatus.DELETED) {
-
-            throw new RuntimeException(
-                    "Department is already deleted"
-            );
+        if (department.getStatus() == RecordStatus.DELETED) {
+            throw new RuntimeException("Department is already deleted");
         }
+        assertNotLinkedToActiveElection(id);
 
         createTrashRecord(department, request);
 
-        department.setStatus(
-                RecordStatus.DELETED
-        );
+        List<String> memberStudentIds = departmentMemberRepository.findByDepartmentId(id).stream()
+                .map(DepartmentMember::getStudentId)
+                .toList();
 
+        department.setStatus(RecordStatus.DELETED);
         departmentRepository.save(department);
 
-        auditLogService.log(
-                request,
-                AuditAction.DELETE,
-                "Departments",
-                department.getId(),
-                "Moved department to trash: " +
-                        department.getTitle(),
-                null
-        );
-    }
+        candidateRoleSyncService.demoteDepartmentMembers(memberStudentIds);
 
-    // =========================================================
-    // RESTORE
-    // =========================================================
+        auditLogService.log(request, AuditAction.DELETE, "Departments", department.getId(),
+                "Moved department to trash: " + department.getTitle(), null);
+
+        realtime.departmentsChanged(department.getCampus().getId());
+        realtime.historyChanged("trash");
+    }
 
     public void restore(UUID id, HttpServletRequest request) {
         Department department = getById(id);
+        assertMembersRestorable(department);
 
-        assertMembersRestorable(department);   // was: the inline for-loop
-
-        if (department.getStatus() != RecordStatus.DELETED &&
-                department.getStatus() != RecordStatus.ARCHIVED) {
+        if (department.getStatus() != RecordStatus.DELETED && department.getStatus() != RecordStatus.ARCHIVED) {
             throw new RuntimeException("Department cannot be restored");
         }
 
         department.setStatus(RecordStatus.ACTIVE);
         departmentRepository.save(department);
 
+        List<String> memberStudentIds = departmentMemberRepository.findByDepartmentId(id).stream()
+                .map(DepartmentMember::getStudentId)
+                .toList();
+        candidateRoleSyncService.promoteAll(memberStudentIds);
+
         restoreArchiveRecord(id);
         restoreTrashRecord(id);
 
-        auditLogService.log(
-                request, AuditAction.RESTORE, "Departments", department.getId(),
-                "Restored department: " + department.getTitle(), null
-        );
+        auditLogService.log(request, AuditAction.RESTORE, "Departments", department.getId(),
+                "Restored department: " + department.getTitle(), null);
+
+        realtime.departmentsChanged(department.getCampus().getId());
     }
 
     // =========================================================
@@ -824,7 +829,7 @@ public class DepartmentService {
 
         departmentRepository.delete(department);
 
-        studentIds.forEach(candidateRoleSyncService::demoteToVoterIfNoLongerCandidate);
+        candidateRoleSyncService.demoteDepartmentMembers(studentIds);
     }
 
     // =========================================================

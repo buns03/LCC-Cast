@@ -1,5 +1,6 @@
 package lccast.voting.system.service;
 
+import lccast.voting.system.model.RecordStatus;
 import lccast.voting.system.model.UserProfile;
 import lccast.voting.system.model.UserRole;
 import lccast.voting.system.model.Voter;
@@ -11,24 +12,25 @@ import lccast.voting.system.repository.VoterRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+
 /**
  * Keeps UserProfile.role in sync with candidacy.
  *
- * ASSUMPTIONS (I don't have UserRole.java, VoterRepository, CandidateRepository,
- * PartylistMemberRepository, or DepartmentMemberRepository to check against):
- *  - UserRole has a CANDIDATE constant. SecurityConfig already calls
- *    .hasRole("CANDIDATE") for /candidate/**, so this almost certainly exists.
- *  - VoterRepository needs a findByStudentId(String) method (see
- *    repository-additions.txt).
- *  - CandidateRepository / PartylistMemberRepository / DepartmentMemberRepository
- *    each need an existsByStudentId(String) method (see repository-additions.txt).
+ * Two kinds of demotion:
  *
- * INTEGRATION (see integration-notes.txt for exact call sites):
- *  - Call promoteToCandidate(studentId) right after a Candidate, PartylistMember,
- *    or DepartmentMember row is created for that student.
- *  - Call demoteToVoterIfNoLongerCandidate(studentId) right after such a row is
- *    deleted (directly, or as a cascade of an election/partylist/department
- *    being deleted).
+ *  1) demoteSscMembers / demoteDepartmentMembers  (NEW)
+ *     Used when a PARTYLIST (SSC) or a DEPARTMENT (partylist type or
+ *     representative type) is archived, soft-deleted, permanently deleted, or
+ *     when a member is removed from it. SSC and Department are separate: only
+ *     the SAME kind of candidacy is checked. A member of an archived partylist
+ *     is demoted to voter unless they are still an SSC candidate elsewhere
+ *     (another ACTIVE partylist, or a candidate in an ACTIVE SSC election).
+ *     Being a department member does not keep them a candidate, and vice versa.
+ *
+ *  2) demoteToVoterIfNoLongerCandidate / demoteAllIfNoLongerCandidate  (unchanged)
+ *     Used by election archive/delete and history restore. Keeps the role while
+ *     the student has ANY candidacy, SSC or Department.
  */
 @Service
 public class CandidateRoleSyncService {
@@ -52,6 +54,86 @@ public class CandidateRoleSyncService {
         this.departmentMemberRepository = departmentMemberRepository;
     }
 
+    // =========================================================
+    // SSC (partylist) — separate from Department
+    // =========================================================
+
+    @Transactional
+    public void demoteSscMembers(Collection<String> studentIds) {
+        if (studentIds == null) return;
+        studentIds.forEach(this::demoteSscMember);
+    }
+
+    @Transactional
+    public void demoteSscMember(String studentId) {
+        UserProfile profile = resolveProfile(studentId);
+        if (profile == null || profile.getRole() != UserRole.CANDIDATE) return;
+
+        boolean stillSscCandidate =
+                partylistMemberRepository.existsByStudentIdAndPartylistStatus(studentId, RecordStatus.ACTIVE) ||
+                        candidateRepository.existsSscCandidacy(studentId, RecordStatus.ACTIVE);
+
+        if (!stillSscCandidate) {
+            demote(profile);
+        }
+    }
+
+    // =========================================================
+    // DEPARTMENT (partylist type and representative type) — separate from SSC
+    // =========================================================
+
+    @Transactional
+    public void demoteDepartmentMembers(Collection<String> studentIds) {
+        if (studentIds == null) return;
+        studentIds.forEach(this::demoteDepartmentMember);
+    }
+
+    @Transactional
+    public void demoteDepartmentMember(String studentId) {
+        UserProfile profile = resolveProfile(studentId);
+        if (profile == null || profile.getRole() != UserRole.CANDIDATE) return;
+
+        boolean stillDepartmentCandidate =
+                departmentMemberRepository.existsByStudentIdAndDepartmentStatus(studentId, RecordStatus.ACTIVE) ||
+                        candidateRepository.existsDepartmentCandidacy(studentId, RecordStatus.ACTIVE);
+
+        if (!stillDepartmentCandidate) {
+            demote(profile);
+        }
+    }
+
+    // =========================================================
+    // ANY candidacy (elections archive/delete, history restore) — unchanged
+    // =========================================================
+
+    @Transactional
+    public void demoteToVoterIfNoLongerCandidate(String studentId) {
+        UserProfile profile = resolveProfile(studentId);
+        if (profile == null) return;
+        if (profile.getRole() != UserRole.CANDIDATE) return;
+
+        boolean stillCandidate =
+                candidateRepository.existsByStudentIdAndElectionStatus(studentId, RecordStatus.ACTIVE) ||
+                        partylistMemberRepository.existsByStudentIdAndPartylistStatus(studentId, RecordStatus.ACTIVE) ||
+                        departmentMemberRepository.existsByStudentIdAndDepartmentStatus(studentId, RecordStatus.ACTIVE);
+
+        if (!stillCandidate) {
+            demote(profile);
+        }
+    }
+
+    @Transactional
+    public void demoteAllIfNoLongerCandidate(Collection<String> studentIds) {
+        if (studentIds == null) return;
+        studentIds.forEach(this::demoteToVoterIfNoLongerCandidate);
+    }
+
+    @Transactional
+    public void promoteAll(Collection<String> studentIds) {
+        if (studentIds == null) return;
+        studentIds.forEach(this::promoteToCandidate);
+    }
+
     @Transactional
     public void promoteToCandidate(String studentId) {
         UserProfile profile = resolveProfile(studentId);
@@ -63,22 +145,13 @@ public class CandidateRoleSyncService {
         }
     }
 
-    @Transactional
-    public void demoteToVoterIfNoLongerCandidate(String studentId) {
-        UserProfile profile = resolveProfile(studentId);
-        if (profile == null) return;
+    // =========================================================
+    // helpers
+    // =========================================================
 
-        if (profile.getRole() != UserRole.CANDIDATE) return;
-
-        boolean stillCandidate =
-                candidateRepository.existsByStudentId(studentId) ||
-                        partylistMemberRepository.existsByStudentId(studentId) ||
-                        departmentMemberRepository.existsByStudentId(studentId);
-
-        if (!stillCandidate) {
-            profile.setRole(UserRole.STUDENT);
-            userProfileRepository.save(profile);
-        }
+    private void demote(UserProfile profile) {
+        profile.setRole(UserRole.STUDENT);
+        userProfileRepository.save(profile);
     }
 
     private UserProfile resolveProfile(String studentId) {

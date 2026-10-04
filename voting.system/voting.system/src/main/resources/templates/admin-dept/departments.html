@@ -9,13 +9,17 @@
     />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>LCCast | Departments</title>
+    <title>LCC Cast | Departments</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/lcccast_logo.png" />
+    <link rel="apple-touch-icon" href="/images/lcccast_logo.png" />
     <link rel="stylesheet" href="/css/base.css" />
     <link rel="stylesheet" href="/css/admin/layout.css" />
     <link rel="stylesheet" href="/css/components.css" />
     <link rel="stylesheet" href="/css/forms.css" />
     <link rel="stylesheet" href="/css/modal.css" />
     <link rel="stylesheet" href="/css/navigation.css" />
+    <link rel="stylesheet" href="/css/pages/doc-preview-ratio.css" />
     <link rel="stylesheet" href="/css/pages/departments.css" />
     <link
       rel="stylesheet"
@@ -47,7 +51,7 @@ SIDEBAR
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-top">
         <div class="logo">
-          <img src="/images/lcccast_logo.png" alt="LCCast" />
+          <img src="/images/lcccast_logo.png" alt="LCC Cast" />
 
           <h2 >LCC Cast</h2>
         </div>
@@ -504,7 +508,7 @@ SIDEBAR
 
             <h2>Logout?</h2>
 
-            <p>Are you sure you want to logout from LCCast?</p>
+            <p>Are you sure you want to logout from LCC Cast?</p>
           </div>
 
           <div class="modal-footer">
@@ -562,17 +566,23 @@ SIDEBAR
       </div>
     </main>
 
+    <script src="/js/superadmin/soft-cache.js"></script>
+
     <script src="/js/navigation.js"></script>
     <!-- <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script> -->
 
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="/js/logout.js"></script>
+    <script src="/js/doc-preview-ratio.js"></script>
 
     <script>
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
     </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
 
     <script src="/js/admin-dept/departments/departments-utils.js"></script>
     <script src="/js/admin-dept/departments/departments-campus.js"></script>

@@ -583,6 +583,8 @@ FORM
 }
 
 
+
+
 /* ==========================================================
    EDIT PARTYLIST / DEPARTMENT
 ========================================================== */
@@ -1531,4 +1533,23 @@ BUTTONS
         width: 100%;
     }
 
+    #existingElections .election-title h3 {
+        font-size: 15.5px;
+    }
+
+    .email-election-modal .modal-header h2 {
+        font-size: 17px;
+    }
+
+}
+
+@media (max-width: 500px) {
+
+    #existingElections .election-title h3 {
+        font-size: 14.5px;
+    }
+
+    #existingElections .election-title small {
+        font-size: 12px;
+    }
 }

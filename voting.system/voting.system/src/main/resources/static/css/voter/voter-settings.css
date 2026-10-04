@@ -811,6 +811,14 @@ RESPONSIVE
 
 @media (max-width:768px) {
 
+.settings-card-header h2 {
+    font-size: 18px;
+}
+
+.settings-card-header p {
+    font-size: 12.5px;
+}
+
 
 .settings-card-header {
 
@@ -859,9 +867,76 @@ RESPONSIVE
 
 
 .settings-card-header h2 {
+    font-size: 17px;
+}
 
-    font-size:18px;
+.settings-card-header p {
+    font-size: 12px;
+}
 
+.settings-card-header h2 i {
+    font-size: 16px;
+}
+
+.profile-picture-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 18px 20px;
+}
+
+.profile-picture-preview {
+    width: 64px;
+    height: 64px;
+}
+
+.profile-picture-info h3 {
+    font-size: 14px;
+}
+
+.profile-picture-info p {
+    font-size: 11.5px;
+}
+
+#changeProfilePicture {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 11.5px;
+}
+
+.voter-profile-form .form-group label {
+    font-size: 12.5px;
+}
+
+.voter-profile-form input[type="email"],
+.voter-profile-form input[type="password"],
+.voter-profile-form input[type="text"] {
+    height: 44px;
+    font-size: 13px;
+}
+
+.field-with-action {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.change-toggle-btn {
+    width: 100%;
+    height: 44px;
+    font-size: 13px;
+}
+
+.settings-section-divider h3 {
+    font-size: 14.5px;
+}
+
+.settings-section-divider p {
+    font-size: 11.5px;
+}
+
+.settings-form-actions button {
+    height: 44px;
+    font-size: 13px;
 }
 
 
@@ -916,4 +991,47 @@ RESPONSIVE
 }
 
 
+}
+
+@media (max-width:400px) {
+
+    .settings-card-header {
+        padding: 16px;
+    }
+
+    .settings-card-header h2 {
+        font-size: 15.5px;
+    }
+
+    .settings-card-header p {
+        font-size: 11.5px;
+    }
+
+    .profile-picture-section {
+        padding: 16px;
+    }
+
+    .profile-picture-preview {
+        width: 56px;
+        height: 56px;
+    }
+
+    .voter-profile-form {
+        padding: 20px 16px;
+    }
+
+    .voter-profile-form .form-group {
+        margin-bottom: 16px;
+    }
+
+    .settings-section-divider {
+        margin: 22px 0 18px;
+        padding-top: 18px;
+    }
+
+    .settings-form-actions {
+        margin-top: 22px;
+        padding-top: 18px;
+        gap: 10px;
+    }
 }

@@ -28,7 +28,7 @@ function initializeDeleteDiscardModals() {
         );
 
         try {
-            const response = await fetch(`/superadmin/api/partylists/${partylistId}`, {
+            const response = await fetch(`${PARTYLIST_API}/${partylistId}`, {
                 method: "DELETE",
                 headers: {
                     "Content-Type": "application/json"
@@ -84,9 +84,7 @@ function initializeDeleteDiscardModals() {
         );
 
         try {
-            const response = await fetch(
-                `/superadmin/api/partylists/${partylistId}/archive`,
-                {
+            const response = await fetch(`${PARTYLIST_API}/${partylistId}/archive`, {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
