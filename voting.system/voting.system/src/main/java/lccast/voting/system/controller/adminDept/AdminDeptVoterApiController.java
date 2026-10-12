@@ -8,7 +8,12 @@ import lccast.voting.system.service.student.VoterDepartmentElectionService;
 import lccast.voting.system.service.superadmin.VoterService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
+import lccast.voting.system.util.ProgramCourseNormalizer;
+import lccast.voting.system.job.*;
+import java.io.BufferedWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -22,6 +27,7 @@ public class AdminDeptVoterApiController {
     private final ElectionRepository electionRepository;
     private final VoteLogRepository voteLogRepository;
     private final VoterDepartmentElectionService voterDepartmentElectionService;
+    private final BackgroundJobService jobs;
 
     public AdminDeptVoterApiController(
             VoterRepository voterRepository,
@@ -29,7 +35,8 @@ public class AdminDeptVoterApiController {
             VoterService voterService,
             ElectionRepository electionRepository,
             VoteLogRepository voteLogRepository,
-            VoterDepartmentElectionService voterDepartmentElectionService
+            VoterDepartmentElectionService voterDepartmentElectionService,
+            BackgroundJobService jobs
     ) {
         this.voterRepository = voterRepository;
         this.campusRepository = campusRepository;
@@ -37,6 +44,7 @@ public class AdminDeptVoterApiController {
         this.electionRepository = electionRepository;
         this.voteLogRepository = voteLogRepository;
         this.voterDepartmentElectionService = voterDepartmentElectionService;
+        this.jobs = jobs;
     }
 
     // =====================================================
@@ -57,6 +65,15 @@ public class AdminDeptVoterApiController {
         return new Scope(campusId, programCourse);
     }
 
+    private List<String> programs(Scope scope) {
+        return voterService.resolveProgramVariants(scope.campusId(), scope.programCourse());
+    }
+
+    private Optional<Voter> findOwned(UUID id, Scope scope) {
+        return voterRepository.findByIdAndCampusAndProgramVariants(
+                id, scope.campusId(), programs(scope), RecordStatus.ACTIVE);
+    }
+
     // =====================================================
     // GET ALL — scoped to this admin's own campus + program
     // =====================================================
@@ -66,8 +83,7 @@ public class AdminDeptVoterApiController {
 
         Scope scope = requireScope(session);
 
-        List<Voter> voters = voterRepository.findByCampusIdAndProgramCourseAndStatus(
-                scope.campusId(), scope.programCourse(), RecordStatus.ACTIVE);
+        List<Voter> voters = voterRepository.findByCampusAndProgramVariants(scope.campusId(), programs(scope), RecordStatus.ACTIVE);
 
         if (voters.isEmpty()) {
             return ResponseEntity.ok(List.of());
@@ -108,8 +124,7 @@ public class AdminDeptVoterApiController {
     public ResponseEntity<?> getVoter(@PathVariable UUID id, HttpSession session) {
         Scope scope = requireScope(session);
 
-        return voterRepository.findByIdAndCampusIdAndProgramCourseAndStatus(
-                        id, scope.campusId(), scope.programCourse(), RecordStatus.ACTIVE)
+        return findOwned(id, scope)
                 .map(voter -> ResponseEntity.ok(toResponse(voter, scope)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -129,8 +144,7 @@ public class AdminDeptVoterApiController {
     ) {
         Scope scope = requireScope(session);
 
-        Voter voter = voterRepository.findByIdAndCampusIdAndProgramCourseAndStatus(
-                        id, scope.campusId(), scope.programCourse(), RecordStatus.ACTIVE)
+        Voter voter = findOwned(id, scope)
                 .orElse(null);
 
         if (voter == null) {
@@ -172,8 +186,7 @@ public class AdminDeptVoterApiController {
     @PatchMapping("/{id}/archive")
     public ResponseEntity<?> archiveVoter(@PathVariable UUID id, HttpSession session, HttpServletRequest request) {
         Scope scope = requireScope(session);
-        if (voterRepository.findByIdAndCampusIdAndProgramCourseAndStatus(
-                id, scope.campusId(), scope.programCourse(), RecordStatus.ACTIVE).isEmpty()) {
+        if (findOwned(id, scope).isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         try {
@@ -187,8 +200,7 @@ public class AdminDeptVoterApiController {
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteVoter(@PathVariable UUID id, HttpSession session, HttpServletRequest request) {
         Scope scope = requireScope(session);
-        if (voterRepository.findByIdAndCampusIdAndProgramCourseAndStatus(
-                id, scope.campusId(), scope.programCourse(), RecordStatus.ACTIVE).isEmpty()) {
+        if (findOwned(id, scope).isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         try {
@@ -224,8 +236,7 @@ public class AdminDeptVoterApiController {
         Voter voter = voterRepository.findById(id).orElse(null);
         if (voter == null
                 || !scope.campusId().equals(voter.getCampusId())
-                || voter.getProgramCourse() == null
-                || !voter.getProgramCourse().trim().equalsIgnoreCase(scope.programCourse().trim())) {
+                || !ProgramCourseNormalizer.matches(voter.getProgramCourse(), scope.programCourse())) {
             return ResponseEntity.notFound().build();
         }
 
@@ -279,7 +290,7 @@ public class AdminDeptVoterApiController {
                 continue;
             }
 
-            if (!rowProgram.isBlank() && !rowProgram.equalsIgnoreCase(scope.programCourse().trim())) {
+            if (!rowProgram.isBlank() && !ProgramCourseNormalizer.matches(rowProgram, scope.programCourse())) {
                 skipErrors.add("Row " + rowNumber + ": Skipped — student belongs to course \"" + rowProgram
                         + "\", not your department (\"" + scope.programCourse() + "\").");
                 skippedForScopeMismatch++;
@@ -288,7 +299,7 @@ public class AdminDeptVoterApiController {
 
             Map<String, Object> copy = new HashMap<>(row);
             copy.put("campusId", scope.campusId().toString());
-            copy.put("programCourse", scope.programCourse());
+            copy.put("programCourse", rowProgram.isBlank() ? scope.programCourse() : rowProgram);
             scopedRows.add(copy);
         }
 
@@ -313,7 +324,7 @@ public class AdminDeptVoterApiController {
     private List<UUID> filterToScope(List<UUID> ids, Scope scope) {
         if (ids == null || ids.isEmpty()) return List.of();
         Set<UUID> owned = voterRepository
-                .findByCampusIdAndProgramCourseAndStatus(scope.campusId(), scope.programCourse(), RecordStatus.ACTIVE)
+                .findByCampusAndProgramVariants(scope.campusId(), programs(scope), RecordStatus.ACTIVE)
                 .stream().map(Voter::getId).collect(Collectors.toSet());
         return ids.stream().filter(owned::contains).toList();
     }
@@ -394,8 +405,8 @@ public class AdminDeptVoterApiController {
                 deptVoted == null ? Set.of() : voterService.resolveDepartmentVotedVoterIds(
                         scope.campusId(), List.of(scope.programCourse())));
 
-        var result = voterRepository.searchByCampusAndProgramWithVotingStatus(
-                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+        var result = voterRepository.searchByCampusAndProgramVariantsWithVotingStatus(
+                RecordStatus.ACTIVE, scope.campusId(), programs(scope),
                 blankToNull(yearLevel), blankToNull(section),
                 blankToNull(search == null ? null : search.toLowerCase()),
                 deptVoted, deptVotedIds,
@@ -456,9 +467,10 @@ public class AdminDeptVoterApiController {
     @GetMapping("/facets")
     public ResponseEntity<?> getVoterFacets(HttpSession session) {
         Scope scope = requireScope(session);
+        List<String> programs = programs(scope);
         return ResponseEntity.ok(Map.of(
-                "sections", voterRepository.findDistinctSectionsForDepartment(RecordStatus.ACTIVE, scope.campusId(), scope.programCourse()),
-                "yearLevels", voterRepository.findDistinctYearLevelsForDepartment(RecordStatus.ACTIVE, scope.campusId(), scope.programCourse())
+                "sections", voterRepository.findDistinctSectionsForVariants(RecordStatus.ACTIVE, scope.campusId(), programs),
+                "yearLevels", voterRepository.findDistinctYearLevelsForVariants(RecordStatus.ACTIVE, scope.campusId(), programs)
         ));
     }
 
@@ -473,8 +485,8 @@ public class AdminDeptVoterApiController {
             @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request
     ) {
         Scope scope = requireScope(session);
-        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgram(
-                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgramVariants(
+                RecordStatus.ACTIVE, scope.campusId(), programs(scope),
                 blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search())
         );
         if (ids.isEmpty()) return ResponseEntity.ok(Map.of("message", "No matching voters.", "count", 0));
@@ -487,8 +499,8 @@ public class AdminDeptVoterApiController {
             @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request
     ) {
         Scope scope = requireScope(session);
-        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgram(
-                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgramVariants(
+                RecordStatus.ACTIVE, scope.campusId(), programs(scope),
                 blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search())
         );
         if (ids.isEmpty()) return ResponseEntity.ok(Map.of("message", "No matching voters.", "count", 0));
@@ -509,15 +521,15 @@ public class AdminDeptVoterApiController {
             jakarta.servlet.http.HttpServletResponse response
     ) throws java.io.IOException {
         Scope scope = requireScope(session);
-        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgram(
-                RecordStatus.ACTIVE, scope.campusId(), scope.programCourse(),
+        List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgramVariants(
+                RecordStatus.ACTIVE, scope.campusId(), programs(scope),
                 blankToNull(yearLevel), blankToNull(section), blankToNull(search)
         );
 
         response.setContentType("text/csv;charset=UTF-8");
         response.setHeader("Content-Disposition", "attachment; filename=\"lccast-voters.csv\"");
         var writer = response.getWriter();
-        writer.write("Student ID,Full Name,Year Level,Section,Campus,Email,Department Voting Status,Department Time Voted\n");
+        writer.write("Student ID,Full Name,Course,Year Level,Section,Campus,Email,Department Voting Status,Department Time Voted\n");
 
         if (!ids.isEmpty()) {
             List<Voter> voters = voterRepository.findAllById(ids);
@@ -539,6 +551,7 @@ public class AdminDeptVoterApiController {
                 Map<String, Object> row = buildVoterResponse(v, departmentElectionIdByVoter, voteLogByElectionAndVoter);
                 writer.write(esc.apply(row.get("studentId")) + "," +
                         esc.apply(row.get("fullName")) + "," +
+                        esc.apply(row.get("programCourse")) + "," +
                         esc.apply(row.get("yearLevel")) + "," +
                         esc.apply(row.get("section")) + "," +
                         esc.apply(row.get("campus")) + "," +
@@ -552,5 +565,168 @@ public class AdminDeptVoterApiController {
 
     private String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
+    // ===================== BACKGROUND JOBS =====================
+
+    private UUID sessionUserId(HttpSession session) {
+        Object a = session.getAttribute("userId");
+        if (a == null) throw new IllegalStateException("Session expired. Please log in again.");
+        return a instanceof UUID u ? u : UUID.fromString(a.toString());
+    }
+
+    private static String csv(Object val) {
+        return "\"" + String.valueOf(val == null ? "" : val).replace("\"", "\"\"") + "\"";
+    }
+
+    @PostMapping("/import-async")
+    public ResponseEntity<?> importAsync(
+            @RequestBody List<Map<String, Object>> rows, HttpSession session, HttpServletRequest request) {
+
+        Scope scope = requireScope(session);
+        if (rows == null || rows.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "The import file contains no voter records."));
+        }
+        UUID userId = sessionUserId(session);
+        HttpServletRequest detached = DetachedRequest.from(request);
+
+        String campusName = campusRepository.findById(scope.campusId()).map(Campus::getName).orElse(null);
+
+        List<Map<String, Object>> scopedRows = new ArrayList<>();
+        int outOfScope = 0;
+
+        for (Map<String, Object> row : rows) {
+            String rowCampus = stringValue(row.get("campus"));
+            String rowProgram = stringValue(row.get("programCourse"));
+
+            if (!rowCampus.isBlank() && campusName != null && !rowCampus.equalsIgnoreCase(campusName.trim())) {
+                outOfScope++;
+                continue;
+            }
+            if (!rowProgram.isBlank() && !ProgramCourseNormalizer.matches(rowProgram, scope.programCourse())) {
+                outOfScope++;
+                continue;
+            }
+            Map<String, Object> copy = new HashMap<>(row);
+            copy.put("campusId", scope.campusId().toString());
+            copy.put("programCourse", rowProgram.isBlank() ? scope.programCourse() : rowProgram);
+            scopedRows.add(copy);
+        }
+
+        final int skippedOutOfScope = outOfScope;
+
+        BackgroundJob job = jobs.start(userId, "VOTER_IMPORT", "Importing voters", rows.size(), j -> {
+            int added = 0, updated = 0, skipped = skippedOutOfScope;
+            if (skippedOutOfScope > 0) j.advance(0, skippedOutOfScope);
+
+            for (List<Map<String, Object>> chunk : BackgroundJobService.chunks(scopedRows, 25)) {
+                VoterService.ImportResult r = voterService.importVoters(chunk, detached);
+                added += r.added();
+                updated += r.updated();
+                skipped += r.skipped();
+                j.advance(r.added() + r.updated(), r.skipped());
+                j.setMessage("Added " + added + " · Updated " + updated + " · Skipped " + skipped);
+            }
+        });
+        return ResponseEntity.accepted().body(job.toMap());
+    }
+
+    @PostMapping("/export-async")
+    public ResponseEntity<?> exportAsync(
+            @RequestParam(required = false) String yearLevel,
+            @RequestParam(required = false) String section,
+            @RequestParam(required = false) String search,
+            HttpSession session) {
+
+        Scope scope = requireScope(session);
+        UUID userId = sessionUserId(session);
+        List<String> programVariants = programs(scope);
+
+        BackgroundJob job = jobs.startReadOnly(userId, "VOTER_EXPORT", "Exporting voters", 0, j -> {
+            List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgramVariants(
+                    RecordStatus.ACTIVE, scope.campusId(), programVariants,
+                    blankToNull(yearLevel), blankToNull(section), blankToNull(search));
+            j.setTotal(ids.size());
+
+            Path file = Files.createTempFile("lccast-voters-", ".csv");
+            try (BufferedWriter w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+                w.write("Student ID,Full Name,Course,Year Level,Section,Campus,Email,Department Voting Status,Department Time Voted\n");
+
+                for (List<UUID> chunk : BackgroundJobService.chunks(ids, 200)) {
+                    List<Voter> voters = voterRepository.findAllById(chunk);
+
+                    Map<UUID, UUID> electionByVoter = new HashMap<>();
+                    for (Voter v : voters) {
+                        voterDepartmentElectionService.resolveElectionForStatus(v)
+                                .ifPresent(e -> electionByVoter.put(v.getId(), e.getId()));
+                    }
+                    Set<UUID> electionIds = new HashSet<>(electionByVoter.values());
+                    Map<String, VoteLog> logs = electionIds.isEmpty() ? Map.of()
+                            : voteLogRepository.findByElectionIdIn(electionIds).stream()
+                            .collect(Collectors.toMap(vl -> vl.getElectionId() + "|" + vl.getVoterId(), vl -> vl, (a, b) -> a));
+
+                    for (Voter v : voters) {
+                        Map<String, Object> row = buildVoterResponse(v, electionByVoter, logs);
+                        w.write(csv(row.get("studentId")) + "," + csv(row.get("fullName")) + "," +
+                                csv(row.get("programCourse")) + "," +
+                                csv(row.get("yearLevel")) + "," + csv(row.get("section")) + "," +
+                                csv(row.get("campus")) + "," + csv(row.get("email")) + "," +
+                                csv(row.get("departmentVotingStatus")) + "," +
+                                csv(row.get("departmentVotedAt")) + "\n");
+                    }
+                    j.advance(chunk.size(), 0);
+                }
+            }
+            j.setResult(file, "lccast-voters.csv");
+        });
+        return ResponseEntity.accepted().body(job.toMap());
+    }
+
+    @DeleteMapping("/delete-matching/async")
+    public ResponseEntity<?> deleteMatchingAsync(
+            @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request) {
+
+        Scope scope = requireScope(session);
+        UUID userId = sessionUserId(session);
+        List<String> programVariants = programs(scope);
+        HttpServletRequest detached = DetachedRequest.from(request);
+
+        BackgroundJob job = jobs.start(userId, "VOTER_DELETE", "Moving voters to trash", 0, j -> {
+            List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgramVariants(
+                    RecordStatus.ACTIVE, scope.campusId(), programVariants,
+                    blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search()));
+            j.setTotal(ids.size());
+            if (ids.isEmpty()) j.setMessage("No matching voters.");
+
+            for (List<UUID> chunk : BackgroundJobService.chunks(ids, 100)) {
+                int ok = voterService.deleteVoters(chunk, detached);
+                j.advance(ok, chunk.size() - ok);
+            }
+        });
+        return ResponseEntity.accepted().body(job.toMap());
+    }
+
+    @PatchMapping("/archive-matching/async")
+    public ResponseEntity<?> archiveMatchingAsync(
+            @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request) {
+
+        Scope scope = requireScope(session);
+        UUID userId = sessionUserId(session);
+        List<String> programVariants = programs(scope);
+        HttpServletRequest detached = DetachedRequest.from(request);
+
+        BackgroundJob job = jobs.start(userId, "VOTER_ARCHIVE", "Archiving voters", 0, j -> {
+            List<UUID> ids = voterRepository.findIdsMatchingByCampusAndProgramVariants(
+                    RecordStatus.ACTIVE, scope.campusId(), programVariants,
+                    blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search()));
+            j.setTotal(ids.size());
+            if (ids.isEmpty()) j.setMessage("No matching voters.");
+
+            for (List<UUID> chunk : BackgroundJobService.chunks(ids, 100)) {
+                int ok = voterService.archiveVoters(chunk, detached);
+                j.advance(ok, chunk.size() - ok);
+            }
+        });
+        return ResponseEntity.accepted().body(job.toMap());
     }
 }

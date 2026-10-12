@@ -7,6 +7,7 @@ import lccast.voting.system.service.adminDept.AdminElectionService;
 import lccast.voting.system.service.superadmin.ElectionEmailService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import lccast.voting.system.service.superadmin.EmailProgressTracker;
 
 import java.time.Instant;
 import java.util.Map;
@@ -18,13 +19,16 @@ public class AdminDeptElectionEmailApiController {
 
     private final ElectionEmailService electionEmailService;
     private final AdminElectionService adminElectionService;
+    private final EmailProgressTracker progressTracker;
 
     public AdminDeptElectionEmailApiController(
             ElectionEmailService electionEmailService,
-            AdminElectionService adminElectionService
+            AdminElectionService adminElectionService,
+            EmailProgressTracker progressTracker
     ) {
         this.electionEmailService = electionEmailService;
         this.adminElectionService = adminElectionService;
+        this.progressTracker = progressTracker;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -140,6 +144,7 @@ public class AdminDeptElectionEmailApiController {
     @PostMapping("/send")
     public ResponseEntity<?> sendNow(
             @PathVariable UUID electionId,
+            @RequestParam(required = false) String jobId,
             HttpSession session,
             HttpServletRequest request
     ) {
@@ -158,7 +163,8 @@ public class AdminDeptElectionEmailApiController {
                 electionEmailService.sendNow(
                         electionId,
                         adminId,
-                        request
+                        request,
+                        jobId
                 );
 
         return ResponseEntity.ok(
@@ -168,6 +174,22 @@ public class AdminDeptElectionEmailApiController {
                         "status", campaign.getStatus()
                 )
         );
+    }
+
+    @GetMapping("/progress/{jobId}")
+    public ResponseEntity<EmailProgressTracker.Progress> progress(
+            @PathVariable UUID electionId,
+            @PathVariable String jobId,
+            HttpSession session
+    ) {
+
+        if (!authorized(electionId, session)) {
+            return ResponseEntity.status(401).build();
+        }
+
+        return progressTracker.get(jobId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     /*

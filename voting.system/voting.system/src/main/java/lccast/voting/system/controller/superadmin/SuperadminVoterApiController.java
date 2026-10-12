@@ -3,6 +3,12 @@ package lccast.voting.system.controller.superadmin;
 import jakarta.servlet.http.HttpServletRequest;
 import lccast.voting.system.model.*;
 import lccast.voting.system.repository.*;
+import jakarta.servlet.http.HttpSession;
+import lccast.voting.system.job.*;
+import java.io.BufferedWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import lccast.voting.system.service.superadmin.VoterService;
 import org.springframework.http.ResponseEntity;
@@ -17,15 +23,18 @@ public class SuperadminVoterApiController {
     private final VoterRepository voterRepository;
     private final CampusRepository campusRepository;
     private final VoterService voterService;
+    private final BackgroundJobService jobs;
 
     public SuperadminVoterApiController(
             VoterRepository voterRepository,
             CampusRepository campusRepository,
-            VoterService voterService
+            VoterService voterService,
+            BackgroundJobService jobs
     ) {
         this.voterRepository = voterRepository;
         this.campusRepository = campusRepository;
         this.voterService = voterService;
+        this.jobs = jobs;
     }
 
 // =========================================================
@@ -518,6 +527,130 @@ public class SuperadminVoterApiController {
                     esc.apply(v.get("departmentVotedAt")) + "\n");
         }
         writer.flush();
+    }
+
+    // ===================== BACKGROUND JOBS =====================
+
+    private UUID sessionUserId(HttpSession session) {
+        Object a = session.getAttribute("userId");
+        if (a == null) throw new IllegalStateException("Session expired. Please log in again.");
+        return a instanceof UUID u ? u : UUID.fromString(a.toString());
+    }
+
+    private static String csv(Object val) {
+        return "\"" + String.valueOf(val == null ? "" : val).replace("\"", "\"\"") + "\"";
+    }
+
+    @PostMapping("/import-async")
+    public ResponseEntity<?> importAsync(
+            @RequestBody List<Map<String, Object>> rows, HttpSession session, HttpServletRequest request) {
+
+        if (rows == null || rows.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "The import file contains no voter records."));
+        }
+        UUID userId = sessionUserId(session);
+        HttpServletRequest detached = DetachedRequest.from(request);
+
+        BackgroundJob job = jobs.start(userId, "VOTER_IMPORT", "Importing voters", rows.size(), j -> {
+            int added = 0, updated = 0, skipped = 0;
+            List<String> problems = new ArrayList<>();
+            for (List<Map<String, Object>> chunk : BackgroundJobService.chunks(rows, 25)) {
+                VoterService.ImportResult r = voterService.importVoters(chunk, detached);
+                added += r.added();
+                updated += r.updated();
+                skipped += r.skipped();
+                problems.addAll(r.errors());
+                j.advance(r.added() + r.updated(), r.skipped());
+                String msg = "Added " + added + " · Updated " + updated + " · Skipped " + skipped;
+                if (!problems.isEmpty()) msg += " — " + problems.get(0);
+                j.setMessage(msg);
+            }
+            problems.forEach(p -> System.out.println("IMPORT PROBLEM: " + p));
+        });
+        return ResponseEntity.accepted().body(job.toMap());
+    }
+
+    @PostMapping("/export-async")
+    public ResponseEntity<?> exportAsync(
+            @RequestParam(required = false) UUID campusId,
+            @RequestParam(required = false) String program,
+            @RequestParam(required = false) String yearLevel,
+            @RequestParam(required = false) String section,
+            @RequestParam(required = false) String search,
+            HttpSession session) {
+
+        UUID userId = sessionUserId(session);
+
+        BackgroundJob job = jobs.startReadOnly(userId, "VOTER_EXPORT", "Exporting voters", 0, j -> {
+            List<UUID> ids = voterRepository.findIdsMatching(
+                    RecordStatus.ACTIVE, campusId, blankToNull(program), blankToNull(yearLevel),
+                    blankToNull(section), blankToNull(search));
+            j.setTotal(ids.size());
+
+            Path file = Files.createTempFile("lccast-voters-", ".csv");
+            try (BufferedWriter w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+                w.write("Student ID,Full Name,Course,Year Level,Section,Campus,Email,SSC Voting Status,SSC Time Voted,Department Voting Status,Department Time Voted\n");
+
+                for (List<UUID> chunk : BackgroundJobService.chunks(ids, 200)) {
+                    List<Map<String, Object>> rows = voterService.toResponseList(voterRepository.findAllById(chunk));
+                    for (Map<String, Object> v : rows) {
+                        w.write(csv(v.get("studentId")) + "," + csv(v.get("fullName")) + "," +
+                                csv(v.get("programCourse")) + "," + csv(v.get("yearLevel")) + "," +
+                                csv(v.get("section")) + "," + csv(v.get("campus")) + "," +
+                                csv(v.get("email")) + "," + csv(v.get("sscVotingStatus")) + "," +
+                                csv(v.get("sscVotedAt")) + "," + csv(v.get("departmentVotingStatus")) + "," +
+                                csv(v.get("departmentVotedAt")) + "\n");
+                    }
+                    j.advance(chunk.size(), 0);
+                }
+            }
+            j.setResult(file, "lccast-voters.csv");
+        });
+        return ResponseEntity.accepted().body(job.toMap());
+    }
+
+    @DeleteMapping("/delete-matching/async")
+    public ResponseEntity<?> deleteMatchingAsync(
+            @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request) {
+
+        UUID userId = sessionUserId(session);
+        HttpServletRequest detached = DetachedRequest.from(request);
+
+        BackgroundJob job = jobs.start(userId, "VOTER_DELETE", "Moving voters to trash", 0, j -> {
+            List<UUID> ids = voterRepository.findIdsMatching(
+                    RecordStatus.ACTIVE, filter.campusId(), blankToNull(filter.program()),
+                    blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search()));
+            j.setTotal(ids.size());
+            if (ids.isEmpty()) j.setMessage("No matching voters.");
+
+            for (List<UUID> chunk : BackgroundJobService.chunks(ids, 100)) {
+                int ok = voterService.deleteVoters(chunk, detached);
+                j.advance(ok, chunk.size() - ok);
+            }
+        });
+        return ResponseEntity.accepted().body(job.toMap());
+    }
+
+    @PatchMapping("/archive-matching/async")
+    public ResponseEntity<?> archiveMatchingAsync(
+            @RequestBody VoterBulkFilter filter, HttpSession session, HttpServletRequest request) {
+
+        UUID userId = sessionUserId(session);
+        HttpServletRequest detached = DetachedRequest.from(request);
+
+        BackgroundJob job = jobs.start(userId, "VOTER_ARCHIVE", "Archiving voters", 0, j -> {
+            List<UUID> ids = voterRepository.findIdsMatching(
+                    RecordStatus.ACTIVE, filter.campusId(), blankToNull(filter.program()),
+                    blankToNull(filter.yearLevel()), blankToNull(filter.section()), blankToNull(filter.search()));
+            j.setTotal(ids.size());
+            if (ids.isEmpty()) j.setMessage("No matching voters.");
+
+            for (List<UUID> chunk : BackgroundJobService.chunks(ids, 100)) {
+                int ok = voterService.archiveVoters(chunk, detached);
+                j.advance(ok, chunk.size() - ok);
+            }
+        });
+        return ResponseEntity.accepted().body(job.toMap());
     }
 
 }

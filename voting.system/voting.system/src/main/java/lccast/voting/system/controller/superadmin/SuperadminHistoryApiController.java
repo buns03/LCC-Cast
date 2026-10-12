@@ -30,6 +30,7 @@ public class SuperadminHistoryApiController {
     @GetMapping("/vote-logs")
     public PageResponse<VoteLogDTO> voteLogs(
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String ballotRef,
             @RequestParam(required = false) String program,
             @RequestParam(required = false) String section,
             @RequestParam(required = false) String year,
@@ -39,7 +40,7 @@ public class SuperadminHistoryApiController {
             @RequestParam(required = false, defaultValue = "1") int page,
             @RequestParam(required = false, defaultValue = "false") boolean all // ADD
     ) {
-        return historyService.getVoteLogs(search, program, section, year, category, campusId, sort, page, all);
+        return historyService.getVoteLogs(search, ballotRef, program, section, year, category, campusId, sort, page, all);
     }
 
     @GetMapping("/vote-logs/filter-options")

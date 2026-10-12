@@ -33,7 +33,10 @@ const voterState = {
   pendingArchiveAll: false,
   pendingEditId: null,
 };
-
+function getSelectedCampusId() {
+  const map = { Kaypian: "62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8", Muzon: "9bc86421-63ce-4a7e-94ae-fc1bc6328956" };
+  return voterState.campus.length === 1 ? map[voterState.campus[0]] || null : null;
+}
 /* =========================================================
    SMALL HELPERS
 ========================================================= */
@@ -79,6 +82,13 @@ function initializeVoters() {
   initializeImport();
   initializeDeleteAndArchive();
   loadVoters();
+
+    window.addEventListener("job:completed", (e) => {
+      if (String(e.detail?.type || "").startsWith("VOTER_")) {
+        SoftCache.clear();
+        loadVoters();
+      }
+    });
 }
 
 async function loadFacets() {
@@ -151,16 +161,25 @@ function initializeSuccessToast() {
   $("successToastClose")?.addEventListener("click", hideSuccessToast);
 }
 
-function showSuccessToast(title, message) {
+function showSuccessToast(title, message, type = "success") {
   const toast = $("successToast");
   if (!toast || !$("successToastTitle") || !$("successToastMessage")) return;
 
   $("successToastTitle").textContent = title;
   $("successToastMessage").textContent = message;
+
+  toast.classList.toggle("error", type === "error");
+  const icon = toast.querySelector(".success-toast-icon i");
+  if (icon) icon.className = type === "error" ? "bi bi-x-lg" : "bi bi-check-lg";
+
   toast.classList.add("show");
 
   clearTimeout(window.successToastTimer);
   window.successToastTimer = setTimeout(hideSuccessToast, 3500);
+}
+
+function showErrorToast(title, message) {
+  showSuccessToast(title, message, "error");
 }
 
 function hideSuccessToast() {
@@ -954,6 +973,7 @@ async function performDeleteVoter(id) {
 
 async function performDeleteAllVoters() {
   const filter = {
+    campusId: getSelectedCampusId(),
     program: voterState.program[0] || null,
     yearLevel: voterState.year[0] || null,
     section: voterState.section[0] || null,
@@ -961,24 +981,10 @@ async function performDeleteAllVoters() {
   };
 
   try {
-    const response = await fetch(`${VOTER_API}/delete-matching`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify(filter),
-    });
-
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.message || "Failed to delete voters.");
-
     closeDeleteModal();
-    voterState.page = 1;
-    await loadVoters();
-
-    showSuccessToast("Voters Moved to Trash", `${result.count ?? 0} voter(s) were moved to trash successfully.`);
+    await JobProgress.start(`${VOTER_API}/delete-matching/async`, { method: "DELETE", body: filter });
   } catch (error) {
     console.error("Delete all voters failed:", error);
-    closeDeleteModal();
     showVotersStatusModal("error", "Delete Failed", error.message || "Unable to delete voters.");
   } finally {
     window.hideActionLoading();
@@ -1043,16 +1049,11 @@ function archiveVoter(uuid) {
 }
 
 function archiveAllVoters() {
-  const activeVoters = getFilteredVoters();
-  if (!activeVoters.length) {
-    showSuccessToast("Archive Failed", "There are no active voters to archive.");
-    return;
-  }
-
   voterState.pendingArchiveId = null;
   voterState.pendingArchiveAll = true;
   if ($("archiveVoterMessage")) {
-    $("archiveVoterMessage").textContent = `Are you sure you want to archive all ${activeVoters.length} active voters?`;
+    $("archiveVoterMessage").textContent =
+      "Are you sure you want to archive all voters matching the current filters?";
   }
   if ($("archiveVoterTitle")) $("archiveVoterTitle").textContent = "Archive All Voters?";
   $("archiveVoterModal")?.classList.add("show");
@@ -1112,57 +1113,20 @@ async function performArchiveVoter(id) {
 }
 
 async function performArchiveAllVoters() {
-  const votersToArchive = getFilteredVoters();
-
-  const ids = votersToArchive.map(voter => voter.uuid);
-
-  if (!ids.length) {
-    closeArchiveModal();
-    window.hideActionLoading();
-    return;
-  }
+  const filter = {
+    campusId: getSelectedCampusId(),   // superadmin only; delete this line in admin-ssc
+    program: voterState.program[0] || null,
+    yearLevel: voterState.year[0] || null,
+    section: voterState.section[0] || null,
+    search: voterState.search || null,
+  };
 
   try {
-    const response = await fetch(`${VOTER_API}/archive`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      credentials: "same-origin",
-      body: JSON.stringify(ids)
-    });
-
-    const result = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(
-        result.message || "Failed to archive voters."
-      );
-    }
-
-    const count = result.count ?? ids.length;
-
     closeArchiveModal();
-
-    await loadVoters();
-
-    showSuccessToast(
-      "Voters Archived",
-      `${count} voter(s) were archived successfully.`
-    );
-
+    await JobProgress.start(`${VOTER_API}/archive-matching/async`, { method: "PATCH", body: filter });
   } catch (error) {
     console.error("Archive all voters failed:", error);
-
-    closeArchiveModal();
-
-    showVotersStatusModal(
-      "error",
-      "Archive Failed",
-      error.message || "Unable to archive voters."
-    );
-
+    showVotersStatusModal("error", "Archive Failed", error.message || "Unable to archive voters.");
   } finally {
     window.hideActionLoading();
   }
@@ -1250,6 +1214,10 @@ function initializeActionLoadingModal() {
 
 function initializeExport() {
   $("exportVoters")?.addEventListener("click", () => {
+    if (!totalElements) {
+          showErrorToast("Nothing to Export", "There are no voters to export.");
+          return;
+        }
     const params = new URLSearchParams();
     const campusUUIDMap = { "Kaypian": "62a45c28-56c9-4f39-b4a3-9bc3de5ce5a8", "Muzon": "9bc86421-63ce-4a7e-94ae-fc1bc6328956" };
     if (voterState.campus.length === 1) {
@@ -1260,7 +1228,8 @@ function initializeExport() {
     if (voterState.year[0]) params.set("yearLevel", voterState.year[0]);
     if (voterState.search) params.set("search", voterState.search);
 
-    window.location.href = `${VOTER_API}/export?${params.toString()}`;
+        JobProgress.start(`${VOTER_API}/export-async?${params.toString()}`, { method: "POST" })
+          .catch((err) => showVotersStatusModal("error", "Export Failed", err.message));
   });
 }
 
@@ -1336,38 +1305,8 @@ async function importVoterFile(file) {
       throw new Error("No valid voter records were found.");
     }
 
-    const response = await fetch(VOTER_API + "/import", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      credentials: "same-origin",
-      body: JSON.stringify(imported)
-    });
-
-    console.log("IMPORT STATUS:", response.status);
-
-    const result = await response.json().catch(() => ({}));
-
-    console.log("IMPORT RESPONSE:", result);
-
-    if (!response.ok) {
-      throw new Error(
-        result.message ||
-        `Import failed. HTTP ${response.status}`
-      );
-    }
-
-    await loadVoters();
-
-    showVotersStatusModal(
-      "success",
-      "Import Successful",
-      `Added: ${result.added ?? 0}
-Updated: ${result.updated ?? 0}
-Skipped: ${result.skipped ?? 0}`
-    );
+        window.hideActionLoading();
+        await JobProgress.start(VOTER_API + "/import-async", { method: "POST", body: imported });
 
   } catch (error) {
     console.error("IMPORT ERROR:", error);

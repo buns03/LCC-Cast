@@ -7,6 +7,7 @@ import lccast.voting.system.model.ElectionEmailCampaign;
 import lccast.voting.system.service.superadmin.ElectionEmailService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import lccast.voting.system.service.superadmin.EmailProgressTracker;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -17,9 +18,14 @@ import java.util.UUID;
 public class SuperadminElectionEmailApiController {
 
     private final ElectionEmailService electionEmailService;
+    private final EmailProgressTracker progressTracker;
 
-    public SuperadminElectionEmailApiController(ElectionEmailService electionEmailService) {
+    public SuperadminElectionEmailApiController(
+            ElectionEmailService electionEmailService,
+            EmailProgressTracker progressTracker
+    ) {
         this.electionEmailService = electionEmailService;
+        this.progressTracker = progressTracker;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -58,13 +64,30 @@ public class SuperadminElectionEmailApiController {
 
     @PostMapping("/send")
     public ResponseEntity<?> sendNow(
-            @PathVariable UUID electionId, HttpSession session, HttpServletRequest request) {
+            @PathVariable UUID electionId,
+            @RequestParam(required = false) String jobId,
+            HttpSession session,
+            HttpServletRequest request) {
 
         UUID adminId = resolveUserId(session);
         if (adminId == null) return ResponseEntity.status(401).build();
 
-        ElectionEmailCampaign campaign = electionEmailService.sendNow(electionId, adminId, request);
+        ElectionEmailCampaign campaign =
+                electionEmailService.sendNow(electionId, adminId, request, jobId);
         return ResponseEntity.ok(Map.of("status", campaign.getStatus(), "sentAt", campaign.getSentAt()));
+    }
+
+    @GetMapping("/progress/{jobId}")
+    public ResponseEntity<EmailProgressTracker.Progress> progress(
+            @PathVariable UUID electionId,
+            @PathVariable String jobId,
+            HttpSession session) {
+
+        if (resolveUserId(session) == null) return ResponseEntity.status(401).build();
+
+        return progressTracker.get(jobId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PostMapping("/schedule")

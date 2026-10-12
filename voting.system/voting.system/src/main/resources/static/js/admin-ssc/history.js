@@ -118,9 +118,7 @@ function connectHistorySocket() {
 
 function readVoteLogFilters() {
   return {
-  ...getVoteLogSearchParams(document.getElementById("voteLogSearch")?.value),
-  program: document.getElementById("voteProgramFilter")?.value || "",
-    search: document.getElementById("voteLogSearch")?.value.trim() || "",
+    ...getVoteLogSearchParams(document.getElementById("voteLogSearch")?.value),
     program: document.getElementById("voteProgramFilter")?.value || "",
     section: document.getElementById("voteSectionFilter")?.value || "",
     year: document.getElementById("voteYearLevelFilter")?.value || "",
@@ -1051,17 +1049,14 @@ function buildHistoryReferenceNumber(record) {
 // Reference IDs look like VS-SSC-1A2B3C4D / VS-DEPT-1A2B3C4D.
 // The last part is the first 8 hex chars of the ballot UUID (dashes removed),
 // so the server can match it as a ballot ID prefix.
+// Only a complete reference like VS-SSC-3940DB2B (or VS-DEPT-...) searches by reference.
+// Anything else is treated as a normal name/ID search.
 function getVoteLogSearchParams(rawSearch) {
   const search = (rawSearch || "").trim();
+  const match = search.match(/^VS-(?:SSC|DEPT)-([0-9A-F]{8})$/i);
 
-  if (!/^VS-/i.test(search)) return { search };
-
-  const code = (search.split("-")[2] || "")
-    .replace(/[^0-9a-f]/gi, "")
-    .toLowerCase();
-
-  // "VS-SSC-" typed so far, with no code yet: don't filter anything
-  return code ? { ballotRef: code } : {};
+  if (match) return { ballotRef: match[1].toLowerCase() };
+  return { search };
 }
 
 function formatDateTime(isoString) {

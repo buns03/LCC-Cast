@@ -8,6 +8,7 @@ import lccast.voting.system.service.admin.AdminSscElectionService;
 import lccast.voting.system.service.superadmin.ElectionEmailService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import lccast.voting.system.service.superadmin.EmailProgressTracker;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -19,13 +20,16 @@ public class AdminSscElectionEmailApiController {
 
     private final ElectionEmailService electionEmailService;
     private final AdminSscElectionService adminSscElectionService;
+    private final EmailProgressTracker progressTracker;
 
     public AdminSscElectionEmailApiController(
             ElectionEmailService electionEmailService,
-            AdminSscElectionService adminSscElectionService
+            AdminSscElectionService adminSscElectionService,
+            EmailProgressTracker progressTracker
     ) {
         this.electionEmailService = electionEmailService;
         this.adminSscElectionService = adminSscElectionService;
+        this.progressTracker = progressTracker;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -75,13 +79,30 @@ public class AdminSscElectionEmailApiController {
 
     @PostMapping("/send")
     public ResponseEntity<?> sendNow(
-            @PathVariable UUID electionId, HttpSession session, HttpServletRequest request) {
+            @PathVariable UUID electionId,
+            @RequestParam(required = false) String jobId,
+            HttpSession session,
+            HttpServletRequest request) {
 
         verifyOwnership(electionId, session);
 
         UUID adminId = requireUserId(session);
-        ElectionEmailCampaign campaign = electionEmailService.sendNow(electionId, adminId, request);
+        ElectionEmailCampaign campaign =
+                electionEmailService.sendNow(electionId, adminId, request, jobId);
         return ResponseEntity.ok(Map.of("status", campaign.getStatus(), "sentAt", campaign.getSentAt()));
+    }
+
+    @GetMapping("/progress/{jobId}")
+    public ResponseEntity<EmailProgressTracker.Progress> progress(
+            @PathVariable UUID electionId,
+            @PathVariable String jobId,
+            HttpSession session) {
+
+        verifyOwnership(electionId, session);
+
+        return progressTracker.get(jobId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PostMapping("/schedule")

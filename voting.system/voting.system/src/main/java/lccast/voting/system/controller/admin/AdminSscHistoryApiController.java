@@ -43,6 +43,7 @@ public class AdminSscHistoryApiController {
     public PageResponse<VoteLogDTO> voteLogs(
             HttpSession session,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String ballotRef,
             @RequestParam(required = false) String program,
             @RequestParam(required = false) String section,
             @RequestParam(required = false) String year,
@@ -53,7 +54,7 @@ public class AdminSscHistoryApiController {
     ) {
         // campusId comes from the session only — a client-supplied one is ignored.
         return historyService.getVoteLogsForAdminSsc(
-                sessionCampusId(session), search, program, section, year, category, sort, page, all
+                sessionCampusId(session), search, ballotRef, program, section, year, category, sort, page, all
         );
     }
 

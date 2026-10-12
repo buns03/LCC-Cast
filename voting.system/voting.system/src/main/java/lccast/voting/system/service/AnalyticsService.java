@@ -6,6 +6,7 @@ import lccast.voting.system.repository.*;
 import lccast.voting.system.util.DepartmentUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import lccast.voting.system.util.ProgramCourseNormalizer;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -280,7 +281,7 @@ public class AnalyticsService {
 
             List<Voter> deptVoters = voterRepository.findByCampusIdAndStatus(campus.getId(), RecordStatus.ACTIVE)
                     .stream()
-                    .filter(v -> electionDeptNames.stream().anyMatch(n -> n.equalsIgnoreCase(v.getProgramCourse())))
+                    .filter(v -> electionDeptNames.stream().anyMatch(n -> ProgramCourseNormalizer.matches(v.getProgramCourse(), n)))
                     .collect(Collectors.toList());
             ca.totalVoters = deptVoters.size();
             ca.votesCast = ballotVoteRepository.countDistinctBallotsForElection(election.getId());
@@ -327,31 +328,39 @@ public class AnalyticsService {
     }
 
     private List<ProgramVotes> buildProgramVotes(UUID electionId) {
-        List<Object[]> rows = voteLogRepository.countByElectionIdGroupByProgram(electionId);
-        return rows.stream()
-                .map(r -> new ProgramVotes((String) r[0], (Long) r[1], null))
+        Map<String, Long> votedByCode = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (Object[] r : voteLogRepository.countByElectionIdGroupByProgram(electionId)) {
+            if (r[0] == null) continue;
+            String code = ProgramCourseNormalizer.toDepartmentCode((String) r[0]);
+            if (code.isEmpty()) continue;
+            votedByCode.merge(code, (Long) r[1], Long::sum);
+        }
+        return votedByCode.entrySet().stream()
+                .map(e -> new ProgramVotes(e.getKey(), e.getValue(), null))
                 .collect(Collectors.toList());
     }
 
     /** Registered voters per program (this campus only) minus those who already voted. */
     private List<ProgramVotes> buildProgramNotVoted(UUID campusId, UUID electionId) {
-        Map<String, Long> votedByProgram = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String, Long> votedByCode = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Object[] r : voteLogRepository.countByElectionIdGroupByProgram(electionId)) {
             if (r[0] == null) continue;
-            votedByProgram.merge(((String) r[0]).trim(), (Long) r[1], Long::sum);
+            String code = ProgramCourseNormalizer.toDepartmentCode((String) r[0]);
+            if (code.isEmpty()) continue;
+            votedByCode.merge(code, (Long) r[1], Long::sum);
         }
 
-        Map<String, Long> totalByProgram = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String, Long> totalByCode = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Voter v : voterRepository.findByCampusIdAndStatus(campusId, RecordStatus.ACTIVE)) {
-            String program = v.getProgramCourse();
-            if (program == null || program.isBlank()) continue;
-            totalByProgram.merge(program.trim(), 1L, Long::sum);
+            String code = ProgramCourseNormalizer.toDepartmentCode(v.getProgramCourse());
+            if (code.isEmpty()) continue;
+            totalByCode.merge(code, 1L, Long::sum);
         }
 
-        return totalByProgram.entrySet().stream()
+        return totalByCode.entrySet().stream()
                 .map(e -> new ProgramVotes(
                         e.getKey(),
-                        Math.max(e.getValue() - votedByProgram.getOrDefault(e.getKey(), 0L), 0L),
+                        Math.max(e.getValue() - votedByCode.getOrDefault(e.getKey(), 0L), 0L),
                         null))
                 .collect(Collectors.toList());
     }

@@ -47,6 +47,7 @@ public class ElectionEmailService {
     private final SupabaseStorageService supabaseStorageService;
     private final BallotVoteRepository ballotVoteRepository;
     private final DrawDetectionService drawDetectionService;
+    private final EmailProgressTracker progressTracker;
 
 
     @Value("${lccast.mail.from}")
@@ -77,7 +78,8 @@ public class ElectionEmailService {
             CandidateRepository candidateRepository,
             SupabaseStorageService supabaseStorageService,
             BallotVoteRepository ballotVoteRepository,
-            DrawDetectionService drawDetectionService
+            DrawDetectionService drawDetectionService,
+            EmailProgressTracker progressTracker
     ) {
         this.electionService = electionService;
         this.electionDepartmentRepository = electionDepartmentRepository;
@@ -95,6 +97,7 @@ public class ElectionEmailService {
         this.supabaseStorageService = supabaseStorageService;
         this.ballotVoteRepository = ballotVoteRepository;
         this.drawDetectionService = drawDetectionService;
+        this.progressTracker = progressTracker;
     }
 
     /* ======================================================
@@ -366,35 +369,58 @@ public class ElectionEmailService {
 
     @Transactional
     public ElectionEmailCampaign sendNow(UUID electionId, UUID adminId, HttpServletRequest request) {
-        Election election = electionService.getById(electionId);
-        assertHasSchedule(election);
-        List<Voter> recipients = getEligibleVoters(election);
+        return sendNow(electionId, adminId, request, null);
+    }
 
-        String html = renderHtml(election);
-        String subject = buildSubject(election);
+    @Transactional
+    public ElectionEmailCampaign sendNow(
+            UUID electionId, UUID adminId, HttpServletRequest request, String jobId) {
 
-        ElectionEmailCampaign campaign = new ElectionEmailCampaign();
-        campaign.setElectionId(electionId);
-        campaign.setSubject(subject);
-        campaign.setBody(html);
-        campaign.setSendType("NOW");
-        campaign.setStatus("SENDING");
-        campaign.setCreatedBy(adminId);
-        campaign = campaignRepository.save(campaign);
+        try {
+            Election election = electionService.getById(electionId);
+            assertHasSchedule(election);
+            List<Voter> recipients = getEligibleVoters(election);
 
-        dispatch(campaign, recipients, html, subject);
+            int total = countDeliverable(recipients);
+            progressTracker.start(jobId, total);
 
-        campaign.setStatus("SENT");
-        campaign.setSentAt(Instant.now());
-        campaign = campaignRepository.save(campaign);
+            String html = renderHtml(election);
+            String subject = buildSubject(election);
 
-        auditLogService.log(
-                request, lccast.voting.system.model.AuditAction.UPDATE, "Elections", electionId,
-                "sent election email for: " + election.getTitle(),
-                Map.of("recipients", recipients.size(), "sendType", "NOW")
-        );
+            ElectionEmailCampaign campaign = new ElectionEmailCampaign();
+            campaign.setElectionId(electionId);
+            campaign.setSubject(subject);
+            campaign.setBody(html);
+            campaign.setSendType("NOW");
+            campaign.setStatus("SENDING");
+            campaign.setCreatedBy(adminId);
+            campaign = campaignRepository.save(campaign);
 
-        return campaign;
+            dispatch(campaign, recipients, html, subject, jobId, total);
+
+            campaign.setStatus("SENT");
+            campaign.setSentAt(Instant.now());
+            campaign = campaignRepository.save(campaign);
+
+            auditLogService.log(
+                    request, lccast.voting.system.model.AuditAction.UPDATE, "Elections", electionId,
+                    "sent election email for: " + election.getTitle(),
+                    Map.of("recipients", recipients.size(), "sendType", "NOW")
+            );
+
+            progressTracker.complete(jobId, total);
+            return campaign;
+
+        } catch (RuntimeException e) {
+            progressTracker.fail(jobId, e.getMessage());
+            throw e;
+        }
+    }
+
+    private int countDeliverable(List<Voter> voters) {
+        return (int) voters.stream()
+                .filter(v -> v.getEmail() != null && !v.getEmail().isBlank())
+                .count();
     }
 
     /* ======================================================
@@ -489,6 +515,14 @@ public class ElectionEmailService {
 
     private void dispatch(
             ElectionEmailCampaign campaign, List<Voter> voters, String html, String subject) {
+        dispatch(campaign, voters, html, subject, null, 0);
+    }
+
+    private void dispatch(
+            ElectionEmailCampaign campaign, List<Voter> voters, String html, String subject,
+            String jobId, int total) {
+
+        int processed = 0;
 
         for (Voter voter : voters) {
             if (voter.getEmail() == null || voter.getEmail().isBlank()) continue;
@@ -518,6 +552,8 @@ public class ElectionEmailService {
             }
 
             recipientRepository.save(recipient);
+
+            progressTracker.advance(jobId, ++processed, total);
         }
     }
 

@@ -8,6 +8,7 @@ import lccast.voting.system.model.*;
 import lccast.voting.system.repository.*;
 import jakarta.servlet.http.HttpServletRequest;
 import lccast.voting.system.service.AuditLogService;
+import lccast.voting.system.util.ProgramCourseNormalizer;
 
 import lccast.voting.system.service.CandidatePortalService;
 import lccast.voting.system.service.CandidateRoleSyncService;
@@ -92,90 +93,38 @@ public class DepartmentService {
         return campusRepository.findAll();
     }
 
-    public Voter getStudentForDepartmentMember(
-            String studentId,
-            UUID departmentId
-    ) {
-        Department department = getById(departmentId);
+    private Voter findDepartmentVoter(String studentId, UUID campusId, String departmentName) {
+        if (campusId == null) throw new IllegalArgumentException("Campus is required.");
+        if (departmentName == null || departmentName.isBlank())
+            throw new IllegalArgumentException("Department is required.");
 
-        if (department.getCampus() == null ||
-                department.getCampus().getId() == null) {
-
-            throw new IllegalArgumentException(
-                    "Department campus is required."
-            );
-        }
-
-        String departmentName = department.getName();
-
-        if (departmentName == null || departmentName.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Department name is required."
-            );
-        }
-
-        Voter voter =
-                voterRepository
-                        .findByStudentIdAndCampusIdAndProgramCourse(
-                                studentId,
-                                department.getCampus().getId(),
-                                departmentName
-                        )
-                        .orElseThrow(() ->
-                                new IllegalArgumentException(
-                                        "Student does not belong to the selected campus and department."
-                                )
-                        );
-
-        return voter;
+        return voterRepository.findByStudentId(studentId == null ? "" : studentId.trim())
+                .filter(v -> campusId.equals(v.getCampusId()))
+                .filter(v -> ProgramCourseNormalizer.matches(v.getProgramCourse(), departmentName))
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Student does not belong to the selected campus and department."));
     }
 
-    public Voter getStudentForDepartmentMemberByCampus(
-            String studentId,
-            UUID campusId,
-            UUID departmentId
-    ) {
-        if (campusId == null) {
-            throw new IllegalArgumentException(
-                    "Campus is required."
-            );
-        }
+    public Voter getStudentForDepartmentMember(String studentId, UUID departmentId) {
+        Department department = getById(departmentId);
+        if (department.getCampus() == null || department.getCampus().getId() == null)
+            throw new IllegalArgumentException("Department campus is required.");
+        return findDepartmentVoter(studentId, department.getCampus().getId(), department.getName());
+    }
 
-        if (departmentId == null) {
-            throw new IllegalArgumentException(
-                    "Department is required."
-            );
-        }
+    public Voter getStudentForDepartmentMemberByCampus(String studentId, UUID campusId, UUID departmentId) {
+        if (campusId == null) throw new IllegalArgumentException("Campus is required.");
+        if (departmentId == null) throw new IllegalArgumentException("Department is required.");
 
         Department department = getById(departmentId);
+        if (department.getCampus() == null || !campusId.equals(department.getCampus().getId()))
+            throw new IllegalArgumentException("Department does not belong to the selected campus.");
 
-        if (department.getCampus() == null ||
-                !campusId.equals(department.getCampus().getId())) {
+        return findDepartmentVoter(studentId, campusId, department.getName());
+    }
 
-            throw new IllegalArgumentException(
-                    "Department does not belong to the selected campus."
-            );
-        }
-
-        String departmentName = department.getName();
-
-        if (departmentName == null || departmentName.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Department name is required."
-            );
-        }
-
-        return voterRepository
-                .findByStudentIdAndCampusIdAndProgramCourse(
-                        studentId,
-                        campusId,
-                        departmentName
-                )
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Student does not belong to the selected campus and department."
-                        )
-                );
+    public Voter getStudentForDepartmentMemberByCampusAndName(String studentId, UUID campusId, String departmentName) {
+        return findDepartmentVoter(studentId, campusId, departmentName);
     }
 
     private void assertNotLinkedToActiveElection(UUID departmentId) {
@@ -195,32 +144,6 @@ public class DepartmentService {
         }
     }
 
-
-    public Voter getStudentForDepartmentMemberByCampusAndName(
-            String studentId,
-            UUID campusId,
-            String departmentName
-    ) {
-        if (campusId == null) {
-            throw new IllegalArgumentException("Campus is required.");
-        }
-
-        if (departmentName == null || departmentName.isBlank()) {
-            throw new IllegalArgumentException("Department is required.");
-        }
-
-        return voterRepository
-                .findByStudentIdAndCampusIdAndProgramCourse(
-                        studentId,
-                        campusId,
-                        departmentName
-                )
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Student does not belong to the selected campus and department."
-                        )
-                );
-    }
 
     public Department getById(UUID id) {
         return departmentRepository.findById(id)

@@ -43,6 +43,7 @@ public class AdminDeptHistoryApiController {
     public PageResponse<VoteLogDTO> voteLogs(
             HttpSession session,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String ballotRef,
             @RequestParam(required = false) String section,
             @RequestParam(required = false) String year,
             @RequestParam(required = false, defaultValue = "time-down") String sort,
@@ -56,7 +57,7 @@ public class AdminDeptHistoryApiController {
             return new PageResponse<>(List.of(), 1, 1, 0);
         }
 
-        return historyService.getVoteLogsForAdminDept(campusId, programCourse, search, section, year, sort, page, all);
+        return historyService.getVoteLogsForAdminDept(campusId, programCourse, search, ballotRef, section, year, sort, page, all);
     }
 
     @GetMapping("/vote-logs/filter-options")

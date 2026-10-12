@@ -46,13 +46,20 @@ public class SuperadminAnalyticsApiController {
                     List<Department> depts = e.getElectionDepartments().stream()
                             .map(ElectionDepartment::getDepartment)
                             .collect(Collectors.toList());
+
                     String votingType = depts.isEmpty() || depts.get(0).getVotingType() == null
                             ? "" : depts.get(0).getVotingType().name();
+
+                    // e.g. "BSIS - Test 1" (an election only contains one kind of department)
+                    String departmentName = depts.isEmpty() || depts.get(0).getName() == null
+                            ? "" : depts.get(0).getName();
+
                     return Map.of(
                             "id", e.getId().toString(),
                             "name", e.getTitle(),
                             "title", e.getTitle(),
-                            "votingType", votingType
+                            "votingType", votingType,
+                            "departmentName", departmentName
                     );
                 })
                 .collect(Collectors.toList());

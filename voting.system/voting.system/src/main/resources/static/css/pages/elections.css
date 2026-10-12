@@ -1281,6 +1281,7 @@ BUTTONS
     padding: 16px 24px;
     border-top: 1px solid var(--border);
     background: #FFFFFF;
+    flex-shrink: 0;
 }
 
 .email-election-modal .modal-footer .cancel-btn,
@@ -1321,6 +1322,147 @@ BUTTONS
     background: var(--primary-hover);
 }
 
+/* ==========================================================
+   EMAIL SEND PROGRESS TOAST
+========================================================== */
+
+.email-progress-stack {
+    position: fixed;
+    right: 28px;
+    bottom: 112px; /* sits above the success toast */
+    width: 360px;
+    max-width: calc(100vw - 40px);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 10500;
+    pointer-events: none;
+}
+
+.email-progress-card {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+    padding: 14px 16px;
+    background: #FFFFFF;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, .16);
+    animation: emailProgressIn .25s ease;
+}
+
+@keyframes emailProgressIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.email-progress-icon {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: #EEF0FF;
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+}
+
+.email-progress-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.email-progress-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.email-progress-heading {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.email-progress-percent {
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.email-progress-title {
+    color: var(--subtext);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.email-progress-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #E8ECF5;
+    overflow: hidden;
+}
+
+.email-progress-bar {
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width .4s ease, background .2s ease;
+}
+
+.email-progress-count {
+    color: var(--subtext);
+    font-size: 11px;
+}
+
+.email-progress-close {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #94A3B8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.email-progress-close[hidden] { display: none; }
+.email-progress-close:hover { background: #F1F3F8; color: var(--text); }
+
+/* success */
+.email-progress-card.is-success .email-progress-icon { background: #EAF8EF; color: #16A34A; }
+.email-progress-card.is-success .email-progress-bar,
+.email-progress-card.is-success .email-progress-percent { background: #16A34A; color: #16A34A; }
+.email-progress-card.is-success .email-progress-bar { color: inherit; }
+
+/* error */
+.email-progress-card.is-error .email-progress-icon { background: #FDECEC; color: #DC2626; }
+.email-progress-card.is-error .email-progress-bar { background: #DC2626; }
+.email-progress-card.is-error .email-progress-percent { color: #DC2626; }
+
+@media (max-width: 600px) {
+    .email-progress-stack {
+        right: 12px;
+        bottom: 88px;
+        width: calc(100vw - 24px);
+        max-width: none;
+    }
+}
+
 
 /* ==========================================================
    RESPONSIVE
@@ -1352,11 +1494,14 @@ BUTTONS
 
     .email-election-modal .modal-footer {
         padding: 14px 18px;
+        flex-shrink: 0;
     }
 
     .email-election-modal .modal-footer button {
-        flex: 1;
-    }
+            flex: 0 0 auto;
+            width: 100%;
+            height: 44px;
+        }
 
     .scheduled-email-banner {
         margin: 0 18px;

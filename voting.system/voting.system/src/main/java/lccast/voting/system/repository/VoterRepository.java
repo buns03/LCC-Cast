@@ -361,4 +361,97 @@ public interface VoterRepository extends JpaRepository<Voter, UUID> {
             @Param("sscCategory") ElectionCategory sscCategory,
             org.springframework.data.domain.Pageable pageable
     );
+
+    // =========================================================
+    // DEPARTMENT VARIANTS (majors count as their department)
+    // `programs` must be lower-cased + trimmed
+    // =========================================================
+
+    @Query("SELECT v FROM Voter v WHERE v.status = :status AND v.campusId = :campusId " +
+            "AND LOWER(TRIM(v.programCourse)) IN :programs")
+    List<Voter> findByCampusAndProgramVariants(
+            @Param("campusId") UUID campusId,
+            @Param("programs") List<String> programs,
+            @Param("status") RecordStatus status);
+
+    @Query("SELECT v FROM Voter v WHERE v.id = :id AND v.status = :status AND v.campusId = :campusId " +
+            "AND LOWER(TRIM(v.programCourse)) IN :programs")
+    Optional<Voter> findByIdAndCampusAndProgramVariants(
+            @Param("id") UUID id,
+            @Param("campusId") UUID campusId,
+            @Param("programs") List<String> programs,
+            @Param("status") RecordStatus status);
+
+    @Query("""
+        SELECT v.id FROM Voter v
+        WHERE v.status = :status
+        AND v.campusId = :campusId
+        AND LOWER(TRIM(v.programCourse)) IN :programs
+        AND (:yearLevel IS NULL OR v.yearLevel = :yearLevel)
+        AND (:section IS NULL OR v.section = :section)
+        AND (:search IS NULL OR
+             LOWER(v.fullName) LIKE CONCAT('%', CAST(:search AS string), '%') OR
+             LOWER(v.studentId) LIKE CONCAT('%', CAST(:search AS string), '%'))
+        """)
+    List<UUID> findIdsMatchingByCampusAndProgramVariants(
+            @Param("status") RecordStatus status,
+            @Param("campusId") UUID campusId,
+            @Param("programs") List<String> programs,
+            @Param("yearLevel") String yearLevel,
+            @Param("section") String section,
+            @Param("search") String search);
+
+    @Query("SELECT DISTINCT v.yearLevel FROM Voter v WHERE v.status = :status AND v.campusId = :campusId " +
+            "AND LOWER(TRIM(v.programCourse)) IN :programs AND v.yearLevel IS NOT NULL ORDER BY v.yearLevel")
+    List<String> findDistinctYearLevelsForVariants(
+            @Param("status") RecordStatus status,
+            @Param("campusId") UUID campusId,
+            @Param("programs") List<String> programs);
+
+    @Query("SELECT DISTINCT v.section FROM Voter v WHERE v.status = :status AND v.campusId = :campusId " +
+            "AND LOWER(TRIM(v.programCourse)) IN :programs AND v.section IS NOT NULL ORDER BY v.section")
+    List<String> findDistinctSectionsForVariants(
+            @Param("status") RecordStatus status,
+            @Param("campusId") UUID campusId,
+            @Param("programs") List<String> programs);
+
+    @Query("""
+    SELECT v FROM Voter v
+    WHERE v.status = :status
+    AND v.campusId = :campusId
+    AND LOWER(TRIM(v.programCourse)) IN :programs
+    AND (:yearLevel IS NULL OR v.yearLevel = :yearLevel)
+    AND (:section IS NULL OR v.section = :section)
+    AND (:search IS NULL OR
+         LOWER(v.fullName) LIKE CONCAT('%', CAST(:search AS string), '%') OR
+         LOWER(v.studentId) LIKE CONCAT('%', CAST(:search AS string), '%'))
+    AND (:deptVoted IS NULL OR
+         (:deptVoted = TRUE AND v.id IN :deptVotedIds) OR
+         (:deptVoted = FALSE AND v.id NOT IN :deptVotedIds))
+    ORDER BY
+      CASE WHEN :timeSort = 'Newest' THEN
+        (SELECT MAX(vl.votedAt) FROM VoteLog vl, Election e
+         WHERE vl.voterId = v.id AND e.id = vl.electionId AND e.status = :status
+         AND e.category <> :sscCategory) END DESC NULLS LAST,
+      CASE WHEN :timeSort = 'Oldest' THEN
+        (SELECT MAX(vl.votedAt) FROM VoteLog vl, Election e
+         WHERE vl.voterId = v.id AND e.id = vl.electionId AND e.status = :status
+         AND e.category <> :sscCategory) END ASC NULLS LAST,
+      CASE WHEN :nameSort = 'A-Z' THEN LOWER(v.fullName) END ASC,
+      CASE WHEN :nameSort = 'Z-A' THEN LOWER(v.fullName) END DESC,
+      v.id ASC
+    """)
+    org.springframework.data.domain.Page<Voter> searchByCampusAndProgramVariantsWithVotingStatus(
+            @Param("status") RecordStatus status,
+            @Param("campusId") UUID campusId,
+            @Param("programs") List<String> programs,
+            @Param("yearLevel") String yearLevel,
+            @Param("section") String section,
+            @Param("search") String search,
+            @Param("deptVoted") Boolean deptVoted,
+            @Param("deptVotedIds") List<UUID> deptVotedIds,
+            @Param("nameSort") String nameSort,
+            @Param("timeSort") String timeSort,
+            @Param("sscCategory") ElectionCategory sscCategory,
+            org.springframework.data.domain.Pageable pageable);
 }

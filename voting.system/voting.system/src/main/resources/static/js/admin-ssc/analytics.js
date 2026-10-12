@@ -195,14 +195,8 @@ function showAnalyticsContentSkeleton(container) {
 ========================================================= */
 
 function renderSSC() {
-      const container = document.getElementById("sscCampusAnalytics");
-      if (container) {
-        container.innerHTML = emptyCardMarkup(
-          ADMIN_CAMPUS_NAME,
-          "Supreme Student Council Elections",
-          "Unable to load analytics right now. Please refresh the page.",
-        );
-      }
+        const container = document.getElementById("sscCampusAnalytics");
+        if (!container) return;
 
   destroyChartsWithPrefix("ssc");
   container.innerHTML = "";
@@ -230,15 +224,29 @@ function createCampusElectionSection(data) {
     ? [{ id: data.electionId, title: data.electionTitle }]
     : [];
 
-    const yearSelector = analyticsHistory.length > 1 ? `
-      <div style="margin-left:auto">
-        <select id="sscElectionYearSelect">
-          ${analyticsHistory.map((e) => `
-            <option value="${escapeHtml(e.electionId)}" ${e.electionId === data.electionId ? "selected" : ""}>
-              ${escapeHtml(e.schoolYear || "—")} — ${escapeHtml(e.electionTitle)}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
-            </option>`).join("")}
-        </select>
-      </div>` : "";
+//    const yearSelector = sscElections.length > 1 ? `
+//      <div class="election-year-select-wrapper">
+//        <i class="bi bi-calendar-event"></i>
+//        <select class="election-year-select" data-campus="${campusKey}">
+//          ${sscElections.map((e) => `
+//            <option value="${e.electionId}" ${e.electionId === data.electionId ? "selected" : ""}>
+//              ${escapeHtml(e.schoolYear || "—")} — ${escapeHtml(e.electionTitle)}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
+//            </option>`).join("")}
+//        </select>
+//        <i class="bi bi-chevron-down select-caret"></i>
+//      </div>` : "";
+
+      const yearSelector = analyticsHistory.length > 1 ? `
+        <div class="election-year-select-wrapper">
+          <i class="bi bi-calendar-event"></i>
+          <select class="election-year-select" id="sscElectionYearSelect">
+            ${analyticsHistory.map((e) => `
+              <option value="${e.electionId}" ${e.electionId === data.electionId ? "selected" : ""}>
+                ${escapeHtml(e.schoolYear || "—")} — ${escapeHtml(e.electionTitle)}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
+              </option>`).join("")}
+          </select>
+          <i class="bi bi-chevron-down select-caret"></i>
+        </div>` : "";
 
   section.innerHTML = `
     <div class="campus-election-header">
@@ -703,10 +711,10 @@ function loadJsPDF() {
 async function exportChartPDF(chartId) {
   const jsPDF = await loadJsPDF();
   const chart = charts[chartId];
-  if (!chart) { alert("This graph is not available yet."); return; }
+  if (!chart) { showErrorToast("Nothing to Download", "This graph is not available yet."); return; }
 
   const canvas = document.getElementById(chartId);
-  if (!canvas) { alert("This graph could not be found."); return; }
+  if (!canvas) { showErrorToast("Nothing to Download", "This graph could not be found."); return; }
 
   await prepareChartForExport(chart);
 
@@ -728,6 +736,11 @@ async function exportChartPDF(chartId) {
 }
 
 async function exportAllSSCPDF() {
+
+    if (!hasCharts("ssc")) {
+      showErrorToast("Nothing to Download", "There are no SSC graphs to download.");
+      return;
+    }
   const container = document.getElementById("sscCampusAnalytics");
   container?.querySelectorAll(".election-item").forEach((election) => {
     election.classList.add("expanded");
@@ -776,7 +789,7 @@ async function exportAllSSCPDF() {
     addPDFFooter(pdf, `${ADMIN_CAMPUS_NAME} - SSC`);
   }
 
-  if (firstPage) { alert("No graphs are available for this election."); return; }
+  if (firstPage) { showErrorToast("Nothing to Download", "There are no graphs available for this election."); return; }
 
   pdf.save(`${sanitizeFilename(`SSC-Graphs-${ADMIN_CAMPUS_NAME}`)}.pdf`);
 }
@@ -925,15 +938,33 @@ function initializeSuccessToast() {
   successToastClose?.addEventListener("click", hideSuccessToast);
 }
 
-function showSuccessToast(title = "Success", message = "Action completed successfully.") {
+function showSuccessToast(
+  title = "Success",
+  message = "Action completed successfully.",
+  type = "success",
+) {
   if (!successToast) return;
+
   if (successToastTimer) clearTimeout(successToastTimer);
+
   if (successToastTitle) successToastTitle.textContent = title;
   if (successToastMessage) successToastMessage.textContent = message;
+
+  successToast.classList.toggle("error", type === "error");
+  const icon = successToast.querySelector(".success-toast-icon i");
+  if (icon) icon.className = type === "error" ? "bi bi-x-lg" : "bi bi-check-lg";
+
   successToast.classList.add("show");
   successToastTimer = setTimeout(hideSuccessToast, 3500);
 }
 
+function showErrorToast(title, message) {
+  showSuccessToast(title, message, "error");
+}
+
+function hasCharts(prefix) {
+  return Object.keys(charts).some((key) => key.startsWith(prefix));
+}
 function hideSuccessToast() {
   if (!successToast) return;
   successToast.classList.remove("show");

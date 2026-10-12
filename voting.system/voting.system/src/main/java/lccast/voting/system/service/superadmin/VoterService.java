@@ -11,6 +11,7 @@ import lccast.voting.system.service.RealtimeBroadcastService;
 import lccast.voting.system.service.SupabaseAdminCreateUserResponse;
 import lccast.voting.system.service.SupabaseAuthService;
 import lccast.voting.system.service.student.VoterDepartmentElectionService;
+import lccast.voting.system.util.ProgramCourseNormalizer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +37,7 @@ public class VoterService {
     private final VoteLogRepository voteLogRepository;
     private final lccast.voting.system.service.student.VoterDepartmentElectionService voterDepartmentElectionService;
     private  final RealtimeBroadcastService realtime;
+
 
     public VoterService(
             VoterRepository voterRepository,
@@ -508,6 +510,7 @@ public class VoterService {
                 if (existing.isPresent()) {
 
                     Voter voter = existing.get();
+                    boolean wasInactive = voter.getStatus() != RecordStatus.ACTIVE;
 
                     voter.setLastName(lastName);
                     voter.setFirstName(firstName);
@@ -543,6 +546,11 @@ public class VoterService {
                     voter.setUpdatedAt(Instant.now());
 
                     voterRepository.save(voter);
+
+                    if (wasInactive) {
+                        // marks trash/archive records as restored and re-enables the login account
+                        restoreVoterRecords(voter.getId());
+                    }
 
                     if (voter.getAuthUserId() == null) {
                         createVoterUserAccount(voter, errors, rowNumber);
@@ -1003,6 +1011,20 @@ public class VoterService {
         return (ids == null || ids.isEmpty()) ? List.of(NO_MATCH_SENTINEL) : new ArrayList<>(ids);
     }
 
+    // All stored course strings in this campus that count as the given department,
+    // lower-cased + trimmed (for the repository's LOWER(TRIM(...)) IN :programs).
+    public List<String> resolveProgramVariants(UUID campusId, String departmentCode) {
+        String code = ProgramCourseNormalizer.toDepartmentCode(departmentCode);
+
+        List<String> variants = voterRepository.findDistinctPrograms(RecordStatus.ACTIVE, campusId).stream()
+                .filter(p -> code.equals(ProgramCourseNormalizer.toDepartmentCode(p)))
+                .map(p -> p.trim().toLowerCase())
+                .distinct()
+                .toList();
+
+        return variants.isEmpty() ? List.of(code.toLowerCase()) : variants; // never empty
+    }
+
     public Set<UUID> resolveSscVotedVoterIds(UUID campusId) {
         List<UUID> campusIds = campusId != null
                 ? List.of(campusId)
@@ -1033,10 +1055,15 @@ public class VoterService {
                     ? voterRepository.findDistinctPrograms(RecordStatus.ACTIVE, cid)
                     : programCourses;
 
-            for (String program : programs) {
+            Set<String> codes = programs.stream()
+                    .map(ProgramCourseNormalizer::toDepartmentCode)
+                    .filter(c -> !c.isEmpty())
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+
+            for (String code : codes) {
                 Voter probe = new Voter();
                 probe.setCampusId(cid);
-                probe.setProgramCourse(program);
+                probe.setProgramCourse(code);
                 voterDepartmentElectionService.resolveElectionForStatus(probe)
                         .ifPresent(e -> electionIds.add(e.getId()));
             }

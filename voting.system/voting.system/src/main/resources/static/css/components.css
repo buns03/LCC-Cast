@@ -532,6 +532,56 @@ tbody tr:hover{
 
 }
 
+/* JOB PROGRESS TOAST */
+.job-progress-stack {
+  position: fixed; right: 28px; bottom: 112px;
+  width: 360px; max-width: calc(100vw - 40px);
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 10500; pointer-events: none;
+}
+.job-progress-card {
+  pointer-events: auto; display: flex; align-items: flex-start; gap: 13px;
+  padding: 14px 16px; background: #fff; border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: 0 18px 45px rgba(15, 23, 42, .16);
+}
+.job-progress-icon {
+  width: 42px; height: 42px; flex-shrink: 0; border-radius: 50%;
+  background: #EEF0FF; color: var(--primary);
+  display: flex; align-items: center; justify-content: center; font-size: 19px;
+}
+.job-progress-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.job-progress-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.job-progress-heading { color: var(--text); font-size: 14px; font-weight: 600; }
+.job-progress-percent { color: var(--primary); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.job-progress-title { color: var(--subtext); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-progress-track { height: 8px; border-radius: 999px; background: #E8ECF5; overflow: hidden; }
+.job-progress-bar { height: 100%; width: 0; border-radius: inherit; background: var(--primary); transition: width .4s ease, background .2s ease; }
+.job-progress-count { color: var(--subtext); font-size: 11px; }
+.job-progress-download {
+  align-self: flex-start; margin-top: 2px; padding: 7px 12px; border-radius: 9px;
+  background: var(--primary); color: #fff; font-size: 12px; font-weight: 600;
+  text-decoration: none; cursor: pointer;
+}
+.job-progress-download[hidden] { display: none; }
+.job-progress-close {
+  width: 28px; height: 28px; flex-shrink: 0; border: none; border-radius: 8px;
+  background: transparent; color: #94A3B8; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.job-progress-close[hidden] { display: none; }
+.job-progress-close:hover { background: #F1F3F8; color: var(--text); }
+
+.job-progress-card.is-success .job-progress-icon { background: #EAF8EF; color: #16A34A; }
+.job-progress-card.is-success .job-progress-bar { background: #16A34A; }
+.job-progress-card.is-success .job-progress-percent { color: #16A34A; }
+.job-progress-card.is-error .job-progress-icon { background: #FDECEC; color: #DC2626; }
+.job-progress-card.is-error .job-progress-bar { background: #DC2626; }
+.job-progress-card.is-error .job-progress-percent { color: #DC2626; }
+
+@media (max-width: 600px) {
+  .job-progress-stack { right: 12px; bottom: 88px; width: calc(100vw - 24px); max-width: none; }
+}
+
 /* =========================================================
    RESPONSIVE COMPONENTS
 =========================================================*/

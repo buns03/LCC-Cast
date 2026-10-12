@@ -121,3 +121,11 @@ function buildMobileTabbar() {
 
     document.body.appendChild(tabbar);
 }
+
+(function () {
+  if (document.querySelector("script[data-job-progress]")) return;
+  const s = document.createElement("script");
+  s.src = "/js/job-progress.js";
+  s.dataset.jobProgress = "true";
+  document.head.appendChild(s);
+})();

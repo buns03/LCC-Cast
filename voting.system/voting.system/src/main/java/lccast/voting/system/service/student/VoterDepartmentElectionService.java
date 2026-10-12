@@ -3,7 +3,8 @@ package lccast.voting.system.service.student;
 import lccast.voting.system.model.*;
 import lccast.voting.system.repository.*;
 import lccast.voting.system.service.superadmin.ElectionService;
-
+import lccast.voting.system.util.ProgramCourseNormalizer;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -39,7 +40,7 @@ public class VoterDepartmentElectionService {
         return departmentRepository
                 .findByCampusIdAndStatus(voter.getCampusId(), RecordStatus.ACTIVE)
                 .stream()
-                .filter(d -> voter.getProgramCourse().equalsIgnoreCase(d.getName()))
+                .filter(d -> ProgramCourseNormalizer.matches(voter.getProgramCourse(), d.getName()))
                 .findFirst()
                 .orElse(null);
     }
@@ -52,46 +53,11 @@ public class VoterDepartmentElectionService {
         return departmentRepository
                 .findByCampusIdAndStatus(voter.getCampusId(), RecordStatus.ACTIVE)
                 .stream()
-                .filter(d -> voter.getProgramCourse().equalsIgnoreCase(d.getName()))
+                .filter(d -> ProgramCourseNormalizer.matches(voter.getProgramCourse(), d.getName()))
                 .toList();
     }
 
-//    public Optional<Election> resolveVisibleElection(Voter voter) {
-//
-//        List<Department> departments = resolveVoterDepartments(voter);
-//
-//        if (departments.isEmpty()) {
-//            return Optional.empty();
-//        }
-//
-//        for (Department department : departments) {
-//
-//            List<ElectionDepartment> links =
-//                    electionDepartmentRepository.findByDepartmentId(department.getId());
-//
-//            for (ElectionDepartment link : links) {
-//
-//                Election election = link.getElection();
-//
-//                if (election.getStatus() != RecordStatus.ACTIVE) {
-//                    continue;
-//                }
-//
-//                ElectionService.VoterElectionPhase phase =
-//                        electionService.calculateVoterPhase(election);
-//
-//                if (phase == ElectionService.VoterElectionPhase.HIDDEN
-//                        || phase == ElectionService.VoterElectionPhase.CONCLUDED) {
-//                    continue;
-//                }
-//
-//                return Optional.of(election);
-//            }
-//        }
-//
-//        return Optional.empty();
-//    }
-
+    @Transactional(readOnly = true)
     public Optional<Election> resolveVisibleElection(Voter voter) {
         return pickBest(voter, false);
     }
@@ -119,6 +85,7 @@ public class VoterDepartmentElectionService {
      * not voting eligibility. A concluded election can still have a recorded vote
      * worth showing, so only HIDDEN (not yet open) is excluded here.
      */
+    @Transactional(readOnly = true)
     public Optional<Election> resolveElectionForStatus(Voter voter) {
         return pickBest(voter, true);
     }

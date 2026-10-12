@@ -356,6 +356,7 @@ function initializeSuccessToast() {
 function showSuccessToast(
   title = "Success",
   message = "Action completed successfully.",
+  type = "success",
 ) {
   if (!successToast) return;
 
@@ -364,9 +365,20 @@ function showSuccessToast(
   if (successToastTitle) successToastTitle.textContent = title;
   if (successToastMessage) successToastMessage.textContent = message;
 
-  successToast.classList.add("show");
+  successToast.classList.toggle("error", type === "error");
+  const icon = successToast.querySelector(".success-toast-icon i");
+  if (icon) icon.className = type === "error" ? "bi bi-x-lg" : "bi bi-check-lg";
 
+  successToast.classList.add("show");
   successToastTimer = setTimeout(hideSuccessToast, 3500);
+}
+
+function showErrorToast(title, message) {
+  showSuccessToast(title, message, "error");
+}
+
+function hasCharts(prefix) {
+  return Object.keys(charts).some((key) => key.startsWith(prefix));
 }
 
 function hideSuccessToast() {
@@ -542,15 +554,17 @@ function renderDepartmentAnalytics(data) {
   const ca = history.find((e) => e.electionId === selectedElectionId) || history[0];
   selectedElectionId = ca.electionId;
 
-  const yearSelector = history.length > 1 ? `
-    <div style="margin-left:auto">
-      <select id="departmentElectionYearSelect">
-        ${history.map((e) => `
-          <option value="${e.electionId}" ${e.electionId === ca.electionId ? "selected" : ""}>
-            ${e.schoolYear || "—"} — ${e.electionTitle}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
-          </option>`).join("")}
-      </select>
-    </div>` : "";
+    const yearSelector = history.length > 1 ? `
+      <div class="election-year-select-wrapper">
+        <i class="bi bi-calendar-event"></i>
+        <select class="election-year-select" id="departmentElectionYearSelect">
+          ${history.map((e) => `
+            <option value="${e.electionId}" ${e.electionId === ca.electionId ? "selected" : ""}>
+              ${escapeHtml(e.schoolYear || "—")} — ${escapeHtml(e.electionTitle)}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
+            </option>`).join("")}
+        </select>
+        <i class="bi bi-chevron-down select-caret"></i>
+      </div>` : "";
 
   container.innerHTML = `
     <div class="campus-election-section">
@@ -712,10 +726,16 @@ function initializeExportButton() {
 async function exportChartPDF(chartId) {
   const jsPDF = await loadJsPDF();
   const chart = charts[chartId];
-  if (!chart) { alert("This graph is not available yet."); return; }
+    if (!chart) {
+      showErrorToast("Nothing to Download", "This graph is not available yet.");
+      return;
+    }
 
   const canvas = document.getElementById(chartId);
-  if (!canvas) { alert("This graph could not be found."); return; }
+  if (!canvas) {
+      showErrorToast("Nothing to Download", "This graph could not be found.");
+      return;
+    }
 
   await prepareChartForExport(chart);
 
@@ -737,6 +757,10 @@ async function exportChartPDF(chartId) {
 }
 
 async function exportAllDepartmentPDF() {
+  if (!hasCharts("department")) {
+      showErrorToast("Nothing to Download", "There are no department graphs to download.");
+      return;
+    }
   const jsPDF = await loadJsPDF();
   const chartIds = [
     "departmentCandidateChart",
@@ -770,7 +794,10 @@ async function exportAllDepartmentPDF() {
     addPDFFooter(pdf, label);
   }
 
-  if (firstPage) { alert("No graphs are available for this election."); return; }
+    if (firstPage) {
+      showErrorToast("Nothing to Download", "There are no graphs available for this election.");
+      return;
+    }
 
   pdf.save(`${sanitizeFilename((currentData?.departmentName || "Department") + "-Graphs")}.pdf`);
 }

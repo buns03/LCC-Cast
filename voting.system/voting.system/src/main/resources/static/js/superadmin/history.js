@@ -666,7 +666,7 @@ async function exportVoteLogsToCSV() {
   const campusId = document.getElementById("voteCampusFilter")?.value || "";
   const sort = document.getElementById("voteSortFilter")?.value || "time-down";
 
-  const query = buildQuery({ search, program, section, year, category, campusId, sort, all: true });
+  const query = buildQuery({ ...getVoteLogSearchParams(search), program, section, year, category, campusId, sort, all: true });
 
   try {
     const data = await apiGet(`/superadmin/api/history/vote-logs?${query}`);
@@ -1269,17 +1269,14 @@ function buildHistoryReferenceNumber(record) {
 // Reference IDs look like VS-SSC-1A2B3C4D / VS-DEPT-1A2B3C4D.
 // The last part is the first 8 hex chars of the ballot UUID (dashes removed),
 // so the server can match it as a ballot ID prefix.
+// Only a complete reference like VS-SSC-3940DB2B (or VS-DEPT-...) searches by reference.
+// Anything else is treated as a normal name/ID search.
 function getVoteLogSearchParams(rawSearch) {
   const search = (rawSearch || "").trim();
+  const match = search.match(/^VS-(?:SSC|DEPT)-([0-9A-F]{8})$/i);
 
-  if (!/^VS-/i.test(search)) return { search };
-
-  const code = (search.split("-")[2] || "")
-    .replace(/[^0-9a-f]/gi, "")
-    .toLowerCase();
-
-  // "VS-SSC-" typed so far, with no code yet: don't filter anything
-  return code ? { ballotRef: code } : {};
+  if (match) return { ballotRef: match[1].toLowerCase() };
+  return { search };
 }
 
 function formatDateTime(isoString) {

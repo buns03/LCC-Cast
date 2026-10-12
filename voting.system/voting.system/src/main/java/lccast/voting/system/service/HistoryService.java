@@ -126,7 +126,7 @@ public class HistoryService {
     // ======================================================
 
     public PageResponse<VoteLogDTO> getVoteLogs(
-            String search, String program, String section,
+            String search, String ballotRef, String program, String section,
             String year, String category, UUID campusId, String sort, int page, boolean all
     ) {
         Specification<VoteLog> spec = electionIsActive();
@@ -138,6 +138,9 @@ public class HistoryService {
                     cb.like(cb.lower(root.get("studentId")), like),
                     cb.like(cb.lower(root.get("email")), like)
             ));
+        }
+        if (ballotRef != null && !ballotRef.isBlank()) {
+            spec = spec.and(ballotRefMatches(ballotRef));
         }
         if (program != null && !program.isBlank()) {
             spec = spec.and((root, q, cb) -> cb.equal(root.get("programCourse"), program));
@@ -851,7 +854,7 @@ public class HistoryService {
 
     public PageResponse<VoteLogDTO> getVoteLogsForAdminDept(
             UUID campusId, String programCourse,
-            String search, String section, String year, String sort, int page, boolean all
+            String search, String ballotRef, String section, String year, String sort, int page, boolean all
     ) {
         Specification<VoteLog> spec = electionIsActive()
                 .and((root, query, cb) -> cb.equal(root.get("campusId"), campusId));
@@ -866,6 +869,9 @@ public class HistoryService {
                     cb.like(cb.lower(root.get("studentId")), like),
                     cb.like(cb.lower(root.get("email")), like)
             ));
+        }
+        if (ballotRef != null && !ballotRef.isBlank()) {
+            spec = spec.and(ballotRefMatches(ballotRef));
         }
         if (section != null && !section.isBlank()) {
             spec = spec.and((root, q, cb) -> cb.equal(root.get("section"), section));
@@ -1068,7 +1074,7 @@ public class HistoryService {
      */
     public PageResponse<VoteLogDTO> getVoteLogsForAdminSsc(
             UUID campusId,
-            String search, String program, String section, String year,
+            String search, String ballotRef, String program, String section, String year,
             String category, String sort, int page, boolean all
     ) {
         Specification<VoteLog> spec = electionIsActive()
@@ -1081,6 +1087,9 @@ public class HistoryService {
                     cb.like(cb.lower(root.get("studentId")), like),
                     cb.like(cb.lower(root.get("email")), like)
             ));
+        }
+        if (ballotRef != null && !ballotRef.isBlank()) {
+            spec = spec.and(ballotRefMatches(ballotRef));
         }
         if (program != null && !program.isBlank()) {
             spec = spec.and((root, q, cb) -> cb.equal(root.get("programCourse"), program));
@@ -1210,6 +1219,24 @@ public class HistoryService {
     @Transactional
     public void emptyTrashForAdminSsc(UUID userId, HttpServletRequest request) {
         emptyTrashForAdminDept(userId, request);
+    }
+
+    // Matches the first 8 hex chars of the ballot UUID (dashes removed), e.g. "3940db2b"
+    // Reference = first 8 hex chars of the ballot UUID, e.g. "06ce3e9a".
+// Matches every UUID from 06ce3e9a-0000-... to 06ce3e9a-ffff-...
+    private Specification<VoteLog> ballotRefMatches(String ballotRef) {
+        String ref = ballotRef == null ? "" : ballotRef.trim().toLowerCase();
+
+        return (root, query, cb) -> {
+            if (!ref.matches("[0-9a-f]{8}")) {
+                return cb.disjunction(); // invalid reference -> match nothing
+            }
+
+            UUID low  = UUID.fromString(ref + "-0000-0000-0000-000000000000");
+            UUID high = UUID.fromString(ref + "-ffff-ffff-ffff-ffffffffffff");
+
+            return cb.between(root.<UUID>get("ballotId"), low, high);
+        };
     }
 
     private Specification<VoteLog> electionIsActive() {

@@ -1127,32 +1127,14 @@ function initializeElectionEmailModal() {
       return;
     }
 
-    // Send now
-    closeEmailModal();
+    // Send now — runs in the background with a progress toast
+       closeEmailModal();
 
-    window.showActionLoading(
-      "Sending Election Email...",
-      `Please wait while the announcement for "${electionTitle}" is being sent.`
-    );
-
-    try {
-      const res = await fetch(`${ELECTION_API}/${electionId}/email/send`, {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || `Failed to send email (${res.status}).`);
-      }
-
-      showSuccessToast("Email Sent", "The election email was sent to all eligible voters.");
-    } catch (error) {
-      console.error("Send email failed:", error);
-      showSuccessToast("Send Failed", error.message || "Unable to send the email.");
-    } finally {
-      window.hideActionLoading();
-    }
+       window.EmailProgress.start({
+         electionId,
+         title: electionTitle,
+         baseUrl: ELECTION_API,
+       });
   });
 
   close?.addEventListener("click", closeEmailModal);

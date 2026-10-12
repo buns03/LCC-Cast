@@ -138,12 +138,13 @@ async function attachDepartmentIds() {
 
   DEPARTMENTS = {};
   dbDepartments.forEach((d) => {
-    DEPARTMENTS[d.id] = {
-      id: d.id,
-      name: d.name,
-      title: d.title,
-      votingType: d.votingType,
-    };
+        DEPARTMENTS[d.id] = {
+          id: d.id,
+          name: d.name,
+          title: d.title,
+          votingType: d.votingType,
+          departmentName: d.departmentName,
+        };
   });
 }
 
@@ -181,6 +182,42 @@ const SSC_CHART_TYPES = [
   "sscProgramNotVotedChart",
   "sscActivityChart",
 ];
+
+const DEPARTMENT_GROUPS = [
+  { code: "BSA",    label: "BSA",        aliases: ["BSA"] },
+  { code: "BSAIS",  label: "BSAIS",      aliases: ["BSAIS"] },
+  { code: "BSBA",   label: "BSBA",       aliases: ["BSBA"] },
+  { code: "BAEL",   label: "AB English", aliases: ["BAEL", "AB ENGLISH", "ABENGLISH"] },
+  { code: "BSCRIM", label: "BSCRIM",     aliases: ["BSCRIM"] },
+  { code: "BSCE",   label: "BSCE",       aliases: ["BSCE"] },
+  { code: "BSHM",   label: "BSHM",       aliases: ["BSHM"] },
+  { code: "BSIS",   label: "BSIS",       aliases: ["BSIS"] },
+  { code: "BSPSY",  label: "BSPSY",      aliases: ["BSPSY", "BSPSYCH"] },
+  { code: "EDUC",   label: "EDUC",       aliases: ["EDUC", "BSED", "BEED", "BPE"] },
+];
+
+// Which department does this election belong to? (matches the start of its title)
+// Which department group does this election belong to?
+// Uses the department's name (e.g. "BSIS - Test 1"), not the election title.
+function getDepartmentGroupCode(election) {
+  const name = String(election.departmentName || "").trim().toUpperCase();
+  if (!name) return null;
+
+  for (const group of DEPARTMENT_GROUPS) {
+    for (const alias of group.aliases) {
+      // alias must be followed by a non-letter/digit, so "BSA" doesn't match "BSAIS"
+      const re = new RegExp(`^${alias}(?![A-Z0-9])`);
+      if (re.test(name)) return group.code;
+    }
+  }
+  return null;
+}
+
+function getGroupElections(groupCode) {
+  return Object.values(DEPARTMENTS)
+    .filter((d) => getDepartmentGroupCode(d) === groupCode)
+    .sort((a, b) => String(a.title).localeCompare(String(b.title)));
+}
 
 const DEPARTMENT_CHART_TYPES = [
   "departmentCandidateChart",
@@ -349,23 +386,33 @@ function initializeTabs() {
   });
 }
 
-// Department selector
 function initializeDepartmentSelector() {
-  const selector = document.getElementById("departmentSelector");
-  if (!selector) return;
+  const groupSelect = document.getElementById("departmentSelector");
+  if (!groupSelect) return;
 
-  selector.innerHTML = Object.values(DEPARTMENTS)
-    .map((d) => `<option value="${d.id}">${d.title}</option>`)
+  groupSelect.innerHTML = DEPARTMENT_GROUPS
+    .map((g) => `<option value="${g.code}">${escapeHtml(g.label)}</option>`)
     .join("");
 
-  currentDepartment = Object.keys(DEPARTMENTS)[0] || null;
+  // start on the first department that actually has an election
+  const first = DEPARTMENT_GROUPS.find((g) => getGroupElections(g.code).length);
+  groupSelect.value = (first || DEPARTMENT_GROUPS[0]).code;
+  selectDepartmentElection(groupSelect.value);
 
-  selector.addEventListener("change", (event) => {
-    currentDepartment = event.target.value;
-    const campusSelector = document.getElementById("departmentCampusSelector");
-    const campus = campusSelector?.value || "all";
-    renderDepartment(currentDepartment, campus);
+  groupSelect.addEventListener("change", () => {
+    selectDepartmentElection(groupSelect.value);
+    renderDepartment(currentDepartment, getDepartmentCampus());
   });
+}
+
+// currentDepartment holds the election id for the chosen department
+function selectDepartmentElection(groupCode) {
+  const elections = getGroupElections(groupCode);
+  currentDepartment = elections.length ? elections[0].id : null;
+}
+
+function getDepartmentCampus() {
+  return document.getElementById("departmentCampusSelector")?.value || "all";
 }
 
 // Campus selectors
@@ -433,13 +480,15 @@ function createCampusElectionSection(
       const sscElections = type === "ssc" ? getSscElections(campusKey) : [];
 
       const yearSelector = sscElections.length > 1 ? `
-        <div style="margin-left:auto">
+        <div class="election-year-select-wrapper">
+          <i class="bi bi-calendar-event"></i>
           <select class="election-year-select" data-campus="${campusKey}">
             ${sscElections.map((e) => `
               <option value="${e.electionId}" ${e.electionId === data.electionId ? "selected" : ""}>
-                ${e.schoolYear || "—"} — ${e.electionTitle}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
+                ${escapeHtml(e.schoolYear || "—")} — ${escapeHtml(e.electionTitle)}${e.phase === "CONCLUDED" ? " (Concluded)" : ""}
               </option>`).join("")}
           </select>
+          <i class="bi bi-chevron-down select-caret"></i>
         </div>` : "";
 
   section.innerHTML = `
@@ -448,7 +497,7 @@ function createCampusElectionSection(
                 <i class="bi bi-geo-alt"></i>
                 <div>
                     <h2>${campusName}</h2>
-                    <p>${type === "ssc" ? "Supreme Student Council Elections" : `${DEPARTMENTS[departmentCode]?.title || departmentCode} Department Elections`}</p>
+                       <p>${type === "ssc" ? "Supreme Student Council Elections" : escapeHtml(DEPARTMENTS[departmentCode]?.title || "Department Elections")}</p>
                 </div>
             </div>
             ${yearSelector}
@@ -1247,13 +1296,13 @@ async function exportChartPDF(
   const chart = charts[chartId];
 
   if (!chart) {
-    alert("This graph is not available yet.");
+    showErrorToast("Nothing to Download", "This graph is not available yet.")
     return;
   }
 
   const canvas = document.getElementById(chartId);
   if (!canvas) {
-    alert("This graph could not be found.");
+    showErrorToast("Nothing to Download", "This graph could not be found.");
     return;
   }
 
@@ -1417,7 +1466,7 @@ async function exportChartsForCampuses(type, departmentCode, campusKeys) {
   }
 
   if (firstPage) {
-    alert("No graphs are available for this election.");
+      showErrorToast("Nothing to Download", "There are no graphs available for this election.");
     return;
   }
 
@@ -1431,6 +1480,10 @@ async function exportChartsForCampuses(type, departmentCode, campusKeys) {
 
 // Export all SSC graphs for the selected campus (or every campus)
 async function exportAllSSCPDF() {
+    if (!hasCharts("ssc")) {
+      showErrorToast("Nothing to Download", "There are no SSC graphs to download.");
+      return;
+    }
   const campusFilter =
     document.getElementById("sscCampusSelector")?.value || "all";
   const campusKeys =
@@ -1443,10 +1496,10 @@ async function exportAllSSCPDF() {
 // Export all graphs for the selected department + campus (or every campus)
 async function exportAllDepartmentPDF() {
   const department = DEPARTMENTS[currentDepartment];
-  if (!department) {
-    alert("The selected department is not available.");
-    return;
-  }
+    if (!department || !hasCharts("department")) {
+      showErrorToast("Nothing to Download", "There are no department graphs to download.");
+      return;
+    }
 
   const campusFilter =
     document.getElementById("departmentCampusSelector")?.value || "all";
@@ -1703,6 +1756,7 @@ function hideActionLoading() {
 function showSuccessToast(
   title = "Success",
   message = "Action completed successfully.",
+  type = "success",
 ) {
   if (!successToast) return;
 
@@ -1711,9 +1765,20 @@ function showSuccessToast(
   if (successToastTitle) successToastTitle.textContent = title;
   if (successToastMessage) successToastMessage.textContent = message;
 
-  successToast.classList.add("show");
+  successToast.classList.toggle("error", type === "error");
+  const icon = successToast.querySelector(".success-toast-icon i");
+  if (icon) icon.className = type === "error" ? "bi bi-x-lg" : "bi bi-check-lg";
 
+  successToast.classList.add("show");
   successToastTimer = setTimeout(hideSuccessToast, 3500);
+}
+
+function showErrorToast(title, message) {
+  showSuccessToast(title, message, "error");
+}
+
+function hasCharts(prefix) {
+  return Object.keys(charts).some((key) => key.startsWith(prefix));
 }
 
 function hideSuccessToast() {
