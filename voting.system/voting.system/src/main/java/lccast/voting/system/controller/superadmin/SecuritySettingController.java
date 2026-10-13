@@ -1,7 +1,8 @@
 package lccast.voting.system.controller.superadmin;
 
-import lccast.voting.system.model.SecuritySetting;
+import jakarta.servlet.http.HttpSession;
 import lccast.voting.system.service.SecuritySettingService;
+import lccast.voting.system.util.SessionUserUtil;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,28 +19,11 @@ public class SecuritySettingController {
         this.securitySettingService = securitySettingService;
     }
 
-    @GetMapping
-    public SecuritySetting getSettings() {
-        return securitySettingService.getSettings();
-    }
-
-    @PutMapping
-    public ResponseEntity<?> updateAutoLogout(@RequestBody Map<String, Boolean> body) {
-        Boolean enabled = body.get("autoLogoutEnabled");
-        SecuritySetting updated = securitySettingService.setAutoLogout(enabled != null && enabled);
-        return ResponseEntity.ok(updated);
-    }
-
     @PutMapping("/password")
-    public ResponseEntity<?> changePassword(
-            @RequestBody Map<String, String> body,
-            jakarta.servlet.http.HttpSession session) {
+    public ResponseEntity<?> changePassword(@RequestBody Map<String, String> body,
+                                            HttpSession session) {
         try {
-            Object authUserIdAttr = session.getAttribute("authUserId");
-
-            UUID authUserId = authUserIdAttr instanceof UUID
-                    ? (UUID) authUserIdAttr
-                    : (authUserIdAttr != null ? UUID.fromString(authUserIdAttr.toString()) : null);
+            UUID authUserId = SessionUserUtil.getAuthUserId(session);
 
             securitySettingService.changePassword(
                     authUserId,
@@ -49,6 +33,24 @@ public class SecuritySettingController {
             return ResponseEntity.ok().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PutMapping("/email")
+    public ResponseEntity<?> changeEmail(@RequestBody Map<String, String> body,
+                                         HttpSession session) {
+        try {
+            UUID authUserId = SessionUserUtil.getAuthUserId(session);
+
+            String email = securitySettingService.changeEmail(authUserId, body.get("newEmail"));
+            session.setAttribute("email", email);
+
+            return ResponseEntity.ok(Map.of("email", email));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body("Could not update email. It may already be in use.");
         }
     }
 }

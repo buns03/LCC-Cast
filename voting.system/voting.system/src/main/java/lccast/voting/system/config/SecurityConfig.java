@@ -1,9 +1,12 @@
 package lccast.voting.system.config;
 
+import lccast.voting.system.security.LandingPageResolver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.web.SecurityFilterChain;
@@ -55,7 +58,7 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(
-            HttpSecurity http) throws Exception {
+            HttpSecurity http, LandingPageResolver landingPageResolver) throws Exception {
 
         http
                 .authorizeHttpRequests(auth -> auth
@@ -109,8 +112,8 @@ public class SecurityConfig {
                             response.sendRedirect("/login");
                         })
                         .accessDeniedHandler((request, response, accessDeniedException) -> {
-                            System.out.println("=== ACCESS DENIED (wrong role) === " + request.getMethod() + " " + request.getRequestURI());
-                            response.sendError(403, "Access denied");
+                            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+                            response.sendRedirect(request.getContextPath() + landingPageResolver.resolve(auth));
                         })
                 )
 

@@ -26,6 +26,7 @@ public class AuditLogDTO {
     private String description;
     private List<AuditDetailDTO> details;
     private Instant createdAt;
+    private String profilePictureUrl;
 
     private static final Map<UserRole, String> ROLE_CLASS = Map.of(
             UserRole.STUDENT, "student",
@@ -176,4 +177,12 @@ public class AuditLogDTO {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public String getProfilePictureUrl() {
+        return profilePictureUrl;
+    }
+
+    public void setProfilePictureUrl(String profilePictureUrl) {
+        this.profilePictureUrl = profilePictureUrl;
+    }
 }

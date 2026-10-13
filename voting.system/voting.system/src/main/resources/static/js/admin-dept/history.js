@@ -1325,6 +1325,23 @@ function renderVoteLogs(items) {
     });
   }
 
+  // Profile picture when the user has one; initials otherwise (also if the image fails to load)
+  function renderHistoryAvatar(record) {
+    const initials = escapeActionDetailsHTML(record.initials);
+
+    if (!record.profilePictureUrl) {
+      return `<div class="history-avatar">${initials}</div>`;
+    }
+
+    return `<div class="history-avatar">
+              <span>${initials}</span>
+              <img src="${escapeActionDetailsHTML(record.profilePictureUrl)}"
+                   alt=""
+                   loading="lazy"
+                   onerror="this.remove()" />
+            </div>`;
+  }
+
 function renderActions(items) {
   const tbody = document.getElementById("actionsTable");
   if (!tbody) return;
@@ -1332,14 +1349,14 @@ function renderActions(items) {
   tbody.innerHTML = items
     .map((record) => {
       const badge = getActionBadgeInfo(record.action);
-      const actionClass = record.actionClass || badge.class;
-      const icon = record.icon || badge.icon;
+      const actionClass = badge.class;
+      const icon = badge.icon;
 
       return `
             <tr class="history-row" data-id="${record.id}">
                 <td>
                     <div class="history-user">
-                        <div class="history-avatar">${escapeActionDetailsHTML(record.initials)}</div>
+                        ${renderHistoryAvatar(record)}
                         <div>
                             <strong>${escapeActionDetailsHTML(record.user)}</strong>
                             <small>${escapeActionDetailsHTML(record.role)}</small>
@@ -1370,26 +1387,31 @@ const ENTITY_ICONS = {
   Admins: "bi-person-gear",
 };
 
-const ACTION_BADGE_MAP = {
-  "Login":              { class: "login",   icon: "bi-box-arrow-in-right" },
-  "Logout":             { class: "logout",  icon: "bi-box-arrow-right" },
-  "Password Changed":   { class: "security",icon: "bi-shield-lock" },
-  "Account Created":    { class: "create",  icon: "bi-person-plus" },
-  "Account Updated":    { class: "update",  icon: "bi-person-gear" },
-  "Election Created":   { class: "create",  icon: "bi-calendar-plus" },
-  "Election Updated":   { class: "update",  icon: "bi-calendar-event" },
-  "Election Deleted":   { class: "delete",  icon: "bi-calendar-x" },
-  "Partylist Created":  { class: "create",  icon: "bi-people" },
-  "Partylist Updated":  { class: "update",  icon: "bi-people" },
-  "Department Created": { class: "create",  icon: "bi-building-add" },
-  "Department Updated": { class: "update",  icon: "bi-building" },
-  "Candidate Added":    { class: "create",  icon: "bi-person-badge" },
-  "Candidate Updated":  { class: "update",  icon: "bi-person-badge" },
-  "Candidate Deleted":  { class: "delete",  icon: "bi-person-x" },
-};
+const ACTION_BADGE_RULES = [
+  { match: /fail|denied|invalid|locked/i,                  class: "failed",   icon: "bi-exclamation-triangle" },
+  { match: /login|sign in/i,                               class: "login",    icon: "bi-box-arrow-in-right" },
+  { match: /logout|sign out/i,                             class: "logout",   icon: "bi-box-arrow-right" },
+  { match: /password|security|otp|reset/i,                 class: "security", icon: "bi-shield-lock" },
+  { match: /restor/i,                                      class: "restore",  icon: "bi-arrow-counterclockwise" },
+  { match: /archiv/i,                                      class: "archive",  icon: "bi-archive" },
+  { match: /delet|remov|trash|purge|\b(empty|emptied)\b/i, class: "delete",   icon: "bi-trash3" },
+  { match: /import/i,                                      class: "import",   icon: "bi-upload" },
+  { match: /export|download/i,                             class: "export",   icon: "bi-download" },
+  { match: /vote|ballot/i,                                 class: "vote",     icon: "bi-check2-square" },
+  { match: /\b(start|started|open|opened|publish|published|launch|launched|activate|activated)\b/i, class: "start", icon: "bi-play-circle" },
+  { match: /\b(end|ended|close|closed|stop|stopped|deactivate|deactivated)\b/i, class: "end", icon: "bi-stop-circle" },
+  { match: /\b(creat\w*|add\w*|register\w*)/i,             class: "create",   icon: "bi-plus-circle" },
+  { match: /updat|edit|chang|modif/i,                      class: "update",   icon: "bi-pencil-square" },
+];
 
 function getActionBadgeInfo(actionName) {
-  return ACTION_BADGE_MAP[actionName] || { class: "update", icon: "bi-activity" };
+  const text = String(actionName || "").replace(/_/g, " ");
+  return (
+    ACTION_BADGE_RULES.find((rule) => rule.match.test(text)) || {
+      class: "default",
+      icon: "bi-activity",
+    }
+  );
 }
 
 function renderArchives(items) {
@@ -1693,7 +1715,7 @@ function bindHistoryTrashActions() {
         `Are you sure you want to permanently delete "${name}"? This action cannot be undone.`,
         async () => {
           try {
-            const res = await fetch(`/admin-dept/api/history/trash/${id}`, { method: "DELETE" });
+            const res = await fetch(`/api/admin-dept/history/trash/${id}`, { method: "DELETE" });
             if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
             await fetchTrash(historyPageState.trash);
             showHistoryToast("Record Deleted", `"${name}" has been deleted successfully.`);

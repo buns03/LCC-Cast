@@ -161,7 +161,14 @@ MAIN
         </div>
 
         <div class="profile">
-          <div class="avatar"></div>
+          <div class="avatar">
+            <img
+                    th:if="${profilePictureUrl}"
+                    th:src="${profilePictureUrl}"
+                    alt="Avatar"
+                    style="width:100%;height:100%;border-radius:50%;object-fit:cover;"
+            />
+          </div>
 
           <span th:text="${displayName}">Username</span>
         </div>

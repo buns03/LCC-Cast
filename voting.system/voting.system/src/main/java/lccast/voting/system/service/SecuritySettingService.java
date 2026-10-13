@@ -1,38 +1,22 @@
 package lccast.voting.system.service;
 
-import lccast.voting.system.model.SecuritySetting;
 import lccast.voting.system.model.UserProfile;
-import lccast.voting.system.repository.SecuritySettingRepository;
 import lccast.voting.system.repository.UserProfileRepository;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
 public class SecuritySettingService {
 
-    private final SecuritySettingRepository repository;
     private final UserProfileRepository userProfileRepository;
     private final SupabaseAuthService supabaseAuthService;
 
-    public SecuritySettingService(SecuritySettingRepository repository,
-                                  UserProfileRepository userProfileRepository,
+    public SecuritySettingService(UserProfileRepository userProfileRepository,
                                   SupabaseAuthService supabaseAuthService) {
-        this.repository = repository;
         this.userProfileRepository = userProfileRepository;
         this.supabaseAuthService = supabaseAuthService;
-    }
-
-    public SecuritySetting getSettings() {
-        return repository.findAll().stream()
-                .findFirst()
-                .orElseGet(() -> repository.save(new SecuritySetting()));
-    }
-
-    public SecuritySetting setAutoLogout(boolean enabled) {
-        SecuritySetting settings = getSettings();
-        settings.setAutoLogoutEnabled(enabled);
-        return repository.save(settings);
     }
 
     public void changePassword(UUID authUserId, String currentPassword, String newPassword) {
@@ -47,7 +31,6 @@ public class SecuritySettingService {
             throw new IllegalArgumentException("Account has no linked login.");
         }
 
-        // Verify current password via Supabase Auth
         try {
             supabaseAuthService.login(profile.getEmail(), currentPassword);
         } catch (Exception e) {
@@ -63,5 +46,33 @@ public class SecuritySettingService {
         }
 
         supabaseAuthService.updatePassword(profile.getAuthUserId().toString(), newPassword);
+    }
+
+    public String changeEmail(UUID authUserId, String newEmail) {
+        if (authUserId == null) {
+            throw new IllegalArgumentException("Not logged in.");
+        }
+
+        UserProfile profile = userProfileRepository.findByAuthUserId(authUserId)
+                .orElseThrow(() -> new IllegalArgumentException("Account not found."));
+
+        String email = newEmail == null ? "" : newEmail.trim();
+
+        if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+            throw new IllegalArgumentException("Please enter a valid email address.");
+        }
+
+        if (email.equalsIgnoreCase(profile.getEmail())) {
+            throw new IllegalArgumentException("New email is the same as your current email.");
+        }
+
+        // Supabase Auth first; if it rejects (e.g. already in use) nothing local changes
+        supabaseAuthService.updateEmail(authUserId.toString(), email);
+
+        profile.setEmail(email);
+        profile.setUpdatedAt(Instant.now());
+        userProfileRepository.save(profile);
+
+        return email;
     }
 }

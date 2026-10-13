@@ -9,8 +9,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeSettingsAccordions();
 
   fetchAdmins();
-//  fetchSystemSettings();
-  fetchSecuritySettings();
 
   initializeAdminSearch();
   initializeAdminFilters();
@@ -20,6 +18,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeElectionManagementFields();
 //  initializeLogoUpload();
   initializeSettingsModals();
+  initializeProfilePicture();
+  initializeEmailChange();
 });
 
 async function fetchAdmins() {
@@ -73,18 +73,7 @@ async function fetchAdmins() {
 //  }
 //}
 
-async function fetchSecuritySettings() {
-  try {
-    const settings = await SoftCache.load("/superadmin/api/security-settings", { ttl: 60000 });
-    const toggle = document.getElementById("autoLogoutToggle");
 
-    if (toggle) {
-      toggle.checked = !!settings.autoLogoutEnabled;
-    }
-  } catch (err) {
-    console.error("Failed to load security settings:", err);
-  }
-}
 
 //function initializeLogoUpload() {
 //  const input = document.getElementById("systemLogoInput");
@@ -1990,65 +1979,65 @@ function initializeAdminForms() {
       });
     });
 
-    securityForm.addEventListener("submit", (event) => {
-      event.preventDefault();
+            securityForm.addEventListener("submit", (event) => {
+              event.preventDefault();
 
-      let isValid = true;
+              const fields = Array.from(requiredFields);
+              const passwordTouched = fields.some((f) => f.value.trim() !== "");
+              const pictureTouched = !!selectedProfileFile;
 
-      /* -----------------------------------------
-                   REQUIRED FIELDS
-                ----------------------------------------- */
+              const emailInput = document.getElementById("newEmail");
+              const emailTouched = isEmailSectionOpen() && emailInput.value.trim() !== "";
 
-            requiredFields.forEach((field) => {
-              if (field.value.trim() === "") {
-                showFieldError(field);
-
-                isValid = false;
+              if (!passwordTouched && !pictureTouched && !emailTouched) {
+                fields.forEach(clearFieldError);
+                showSuccessToast("No Changes", "There are no changes to save.");
+                return;
               }
+
+              let isValid = true;
+
+              // Email: only validated if the user typed a new one
+              if (emailTouched) {
+                if (!isValidEmail(emailInput.value)) {
+                  showFieldError(emailInput);
+                  isValid = false;
+                } else {
+                  clearFieldError(emailInput);
+                }
+              } else if (emailInput) {
+                clearFieldError(emailInput);
+              }
+
+              // Passwords: only validated if the user started changing them
+              if (passwordTouched) {
+                fields.forEach((field) => {
+                  if (field.value.trim() === "") {
+                    showFieldError(field);
+                    isValid = false;
+                  }
+                });
+
+                if (password.value.trim() !== "") {
+                  const feedback = getPasswordFeedback(password.value);
+                  if (!feedback.valid) {
+                    showFieldError(password);
+                    isValid = false;
+                  }
+                }
+
+                if (confirmPassword) confirmPassword.dataset.touched = "true";
+                if (!validateSecurityPasswordMatch()) isValid = false;
+                if (!validateSecurityPasswordSame()) isValid = false;
+              } else {
+                fields.forEach(clearFieldError);
+              }
+
+              if (!isValid) return;
+
+              pendingSaveForm = securityForm;
+              openSettingsModal("saveSettingsModal");
             });
-
-            if (password.value.trim() !== "") {
-              const feedback = getPasswordFeedback(password.value);
-              if (!feedback.valid) {
-                showFieldError(password);
-                isValid = false;
-              }
-            }
-
-            const confirmPassword = requiredFields[2];
-
-      if (confirmPassword) {
-        confirmPassword.dataset.touched = "true";
-      }
-
-      if (!validateSecurityPasswordMatch()) {
-        isValid = false;
-      }
-
-      /* -----------------------------------------
-                    CURRENT PASSWORD / NEW PASSWORD
-                ----------------------------------------- */
-
-      if (!validateSecurityPasswordSame()) {
-        isValid = false;
-      }
-
-      /* -----------------------------------------
-                   STOP IF INVALID
-                ----------------------------------------- */
-
-      if (!isValid) {
-        return;
-      }
-
-      /* -----------------------------------------
-                   OPEN CONFIRMATION MODAL
-                ----------------------------------------- */
-
-      pendingSaveForm = securityForm;
-
-      openSettingsModal("saveSettingsModal");
-    });
   }
 }
 
@@ -3112,48 +3101,66 @@ function initializeSettingsModals() {
       const currentPassword = form.querySelector("#currentPassword");
       const newPassword = form.querySelector("#newPassword");
       const confirmNewPassword = form.querySelector("#confirmNewPassword");
-      const autoLogoutToggle = form.querySelector("#autoLogoutToggle");
+      const newEmail = form.querySelector("#newEmail");
+
+      const passwordTouched = [currentPassword, newPassword, confirmNewPassword]
+        .some((f) => f && f.value.trim() !== "");
+      const pictureTouched = !!selectedProfileFile;
+      const emailTouched = isEmailSectionOpen() && newEmail && newEmail.value.trim() !== "";
 
       showActionLoading(
-        "Updating Security",
-        "Please wait while your security settings are being updated..."
+        "Saving Changes...",
+        "Please wait while your changes are being saved..."
       );
 
       try {
-        // 1. Change password (fields are required, so always present here)
-        const pwRes = await fetch("/superadmin/api/security-settings/password", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            currentPassword: currentPassword.value,
-            newPassword: newPassword.value
-          })
+        // 1. Password (only if the fields were filled)
+        if (passwordTouched) {
+          const pwRes = await fetch("/superadmin/api/security-settings/password", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              currentPassword: currentPassword.value,
+              newPassword: newPassword.value
+            })
+          });
+          if (!pwRes.ok) throw new Error(await pwRes.text());
+        }
+
+        // 2. Email (only if a new one was entered)
+        if (emailTouched) {
+          const emailRes = await fetch("/superadmin/api/security-settings/email", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ newEmail: newEmail.value.trim() })
+          });
+          if (!emailRes.ok) throw new Error(await emailRes.text());
+
+          const emailData = await emailRes.json();
+          closeEmailChange(emailData.email);
+        }
+
+        // 3. Profile picture (only if a new file was selected)
+        if (pictureTouched) {
+          await uploadProfilePicture();
+        }
+
+        // Clear only the password fields
+        [currentPassword, newPassword, confirmNewPassword].forEach((f) => {
+          if (!f) return;
+          f.value = "";
+          delete f.dataset.touched;
+          f.closest(".form-group")?.classList.remove("has-error", "password-mismatch", "password-same");
         });
+        newPassword?.dispatchEvent(new Event("input"));
 
-        if (!pwRes.ok) throw new Error(await pwRes.text());
-
-        // 2. Save auto-logout toggle
-        const toggleRes = await fetch("/superadmin/api/security-settings", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            autoLogoutEnabled: autoLogoutToggle ? autoLogoutToggle.checked : true
-          })
-        });
-
-        if (!toggleRes.ok) throw new Error(await toggleRes.text());
-
-        form.reset();
-        if (autoLogoutToggle) autoLogoutToggle.checked = true;
-
-        showSuccessToast("Security Updated", "Security settings updated successfully.");
+        showSuccessToast("Changes Saved", "Your changes were saved successfully.");
       } catch (err) {
-        showSuccessToast("Update Failed", err.message || "Could not update security settings.");
+        showSuccessToast("Update Failed", err.message || "Could not save your changes.");
       } finally {
         hideActionLoading();
       }
     }
-
 }
 
 /* =========================================================
@@ -3267,3 +3274,161 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
+
+/* =========================================================
+   PROFILE PICTURE (selected now, saved only on "Save Changes")
+========================================================= */
+
+let selectedProfileFile = null;
+let originalProfileSrc = null;
+
+const PROFILE_ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const PROFILE_MAX_SIZE = 5 * 1024 * 1024;
+
+function initializeProfilePicture() {
+  const input = document.getElementById("profilePictureInput");
+  const changeBtn = document.getElementById("changeProfilePicture");
+  const preview = document.getElementById("profilePicturePreview");
+
+  if (!input || !changeBtn || !preview) return;
+
+  originalProfileSrc = preview.getAttribute("src");
+
+  changeBtn.addEventListener("click", () => input.click());
+
+  // Select + local preview only. Nothing is sent to the server yet.
+  input.addEventListener("change", () => {
+    const file = input.files[0];
+    if (!file) return;
+
+    if (!PROFILE_ALLOWED_TYPES.includes(file.type)) {
+      showSuccessToast("Invalid File", "Only PNG, JPG, or WEBP images are allowed.");
+      input.value = "";
+      return;
+    }
+
+    if (file.size > PROFILE_MAX_SIZE) {
+      showSuccessToast("File Too Large", "Image must be 5 MB or smaller.");
+      input.value = "";
+      return;
+    }
+
+    selectedProfileFile = file;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      preview.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Called after the Discard modal is confirmed on the Security form
+// Called after the Discard modal is confirmed on the Security form
+function resetSecurityFormExtras() {
+  const preview = document.getElementById("profilePicturePreview");
+  if (preview && originalProfileSrc) preview.src = originalProfileSrc;
+
+  selectedProfileFile = null;
+  const input = document.getElementById("profilePictureInput");
+  if (input) input.value = "";
+
+  closeEmailChange();
+}
+
+// Throws on failure. The caller (saveSecuritySettings) handles loading and toasts.
+async function uploadProfilePicture() {
+  const formData = new FormData();
+  formData.append("file", selectedProfileFile);
+
+  const res = await fetch("/superadmin/settings/profile-picture", {
+    method: "POST",
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Could not update profile picture.");
+
+  const preview = document.getElementById("profilePicturePreview");
+  if (preview && data.profilePictureUrl) preview.src = data.profilePictureUrl;
+  originalProfileSrc = data.profilePictureUrl || originalProfileSrc;
+
+  updateTopbarAvatar(data.profilePictureUrl);
+
+  selectedProfileFile = null;
+  const input = document.getElementById("profilePictureInput");
+  if (input) input.value = "";
+}
+
+// Updates the topbar avatar immediately (it may not have an <img> yet)
+function updateTopbarAvatar(url) {
+  if (!url) return;
+
+  const avatar = document.querySelector(".topbar .avatar");
+  if (!avatar) return;
+
+  let img = avatar.querySelector("img");
+
+  if (!img) {
+    img = document.createElement("img");
+    img.alt = "Avatar";
+    img.style.cssText = "width:100%;height:100%;border-radius:50%;object-fit:cover;";
+    avatar.appendChild(img);
+  }
+
+  img.src = url;
+}
+
+/* =========================================================
+   EMAIL CHANGE (toggle "Change" / "Cancel", saved on Save Changes)
+========================================================= */
+
+function isEmailSectionOpen() {
+  const section = document.getElementById("emailChangeFields");
+  return !!section && !section.hasAttribute("hidden");
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
+}
+
+function initializeEmailChange() {
+  const btn = document.getElementById("changeEmailBtn");
+  const section = document.getElementById("emailChangeFields");
+  const input = document.getElementById("newEmail");
+
+  if (!btn || !section || !input) return;
+
+  btn.addEventListener("click", () => {
+    if (isEmailSectionOpen()) {
+      closeEmailChange();
+    } else {
+      section.removeAttribute("hidden");
+      btn.textContent = "Cancel";
+      input.focus();
+    }
+  });
+
+  input.addEventListener("focus", () => clearFieldError(input));
+  input.addEventListener("input", () => {
+    if (isValidEmail(input.value)) clearFieldError(input);
+  });
+}
+
+// Hides the new-email field. If updatedEmail is given, shows it as the current email.
+function closeEmailChange(updatedEmail) {
+  const btn = document.getElementById("changeEmailBtn");
+  const section = document.getElementById("emailChangeFields");
+  const input = document.getElementById("newEmail");
+  const display = document.getElementById("currentEmailDisplay");
+
+  if (section) section.setAttribute("hidden", "");
+  if (btn) btn.textContent = "Change";
+
+  if (input) {
+    input.value = "";
+    clearFieldError(input);
+  }
+
+  if (display && updatedEmail) display.value = updatedEmail;
+}

@@ -335,9 +335,11 @@
 
 .candidate-group-edit-images {
     display: flex;
-    gap: 24px;
+    flex-direction: column;
+    gap: 22px;
+    width: 100%;
+    min-width: 0;
     margin: 18px 0;
-    flex-wrap: wrap;
 }
 
 /* =========================================================
@@ -420,14 +422,76 @@
 }
 
 /* =========================================================
+   RESPONSIVE SAFETY — prevent edit card overflow
+========================================================= */
+
+.candidate-type-section,
+.candidate-group-card,
+.candidate-group-edit-card,
+.candidate-group-members {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.candidate-group-edit-card .candidate-image-row {
+    width: 100%;
+    min-width: 0;
+    gap: 14px 20px;
+}
+
+.candidate-group-edit-card .candidate-image-preview {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* Beat any inline px sizes set by doc-image-ratio.js */
+.candidate-group-edit-card .candidate-image-preview.doc-ratio-frame {
+    max-width: 100% !important;
+}
+
+.candidate-group-edit-card .candidate-image-preview img,
+.candidate-group-poster .doc-ratio-frame img {
+    max-width: 100%;
+    height: 100%;
+}
+
+.candidate-group-poster .doc-ratio-frame {
+    max-width: 100%;
+}
+
+.candidate-image-actions .secondary-btn {
+    white-space: nowrap;
+}
+
+/* =========================================================
    RESPONSIVE
 ========================================================= */
 
 @media (max-width: 700px) {
-    .candidate-image-row {
-        flex-direction: column;
-        align-items: flex-start;
-    }
+   .candidate-image-row {
+       flex-direction: column;
+       align-items: stretch;
+   }
+
+   .candidate-image-preview-wide {
+       width: 100%;
+       max-width: 100%;
+   }
+
+   .candidate-image-preview-round {
+       align-self: flex-start;
+   }
+
+   .candidate-image-actions {
+       width: 100%;
+   }
+
+   .candidate-image-actions .secondary-btn {
+       width: 100%;
+       justify-content: center;
+   }
 
     .candidate-group-header {
         flex-direction: column;
@@ -514,7 +578,7 @@
 
     .candidate-image-preview-wide {
         width: 100%;
-        max-width: 220px;
+        max-width: 100%;
         height: auto;
         aspect-ratio: 220 / 120;
     }

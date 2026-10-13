@@ -250,9 +250,8 @@ public class HistoryService {
         }
 
         if (all) {
-            List<AuditLogDTO> items = auditLogRepository.findAll(spec, Sort.by("createdAt").descending()).stream()
-                    .map(log -> AuditLogDTO.from(log, auditLogService.getUserName(log.getUserId()), objectMapper))
-                    .collect(Collectors.toList());
+            List<AuditLogDTO> items = toAuditLogDTOs(
+                    auditLogRepository.findAll(spec, Sort.by("createdAt").descending()));
             return new PageResponse<>(items, 1, 1, items.size());
         }
 
@@ -260,10 +259,7 @@ public class HistoryService {
                 spec, PageRequest.of(Math.max(page - 1, 0), PAGE_SIZE, Sort.by("createdAt").descending())
         );
 
-        List<AuditLogDTO> items = pageResult.getContent().stream()
-                .map(log -> AuditLogDTO.from(log, auditLogService.getUserName(log.getUserId()), objectMapper))
-                .collect(Collectors.toList());
-
+        List<AuditLogDTO> items = toAuditLogDTOs(pageResult.getContent());
         return new PageResponse<>(items, page, pageResult.getTotalPages(), pageResult.getTotalElements());
     }
 
@@ -930,9 +926,8 @@ public class HistoryService {
         }
 
         if (all) {
-            List<AuditLogDTO> items = auditLogRepository.findAll(spec, Sort.by("createdAt").descending()).stream()
-                    .map(log -> AuditLogDTO.from(log, auditLogService.getUserName(log.getUserId()), objectMapper))
-                    .collect(Collectors.toList());
+            List<AuditLogDTO> items = toAuditLogDTOs(
+                    auditLogRepository.findAll(spec, Sort.by("createdAt").descending()));
             return new PageResponse<>(items, 1, 1, items.size());
         }
 
@@ -940,10 +935,7 @@ public class HistoryService {
                 spec, PageRequest.of(Math.max(page - 1, 0), PAGE_SIZE, Sort.by("createdAt").descending())
         );
 
-        List<AuditLogDTO> items = pageResult.getContent().stream()
-                .map(log -> AuditLogDTO.from(log, auditLogService.getUserName(log.getUserId()), objectMapper))
-                .collect(Collectors.toList());
-
+        List<AuditLogDTO> items = toAuditLogDTOs(pageResult.getContent());
         return new PageResponse<>(items, page, pageResult.getTotalPages(), pageResult.getTotalElements());
     }
 
@@ -1165,9 +1157,8 @@ public class HistoryService {
         }
 
         if (all) {
-            List<AuditLogDTO> items = auditLogRepository.findAll(spec, Sort.by("createdAt").descending()).stream()
-                    .map(log -> AuditLogDTO.from(log, auditLogService.getUserName(log.getUserId()), objectMapper))
-                    .collect(Collectors.toList());
+            List<AuditLogDTO> items = toAuditLogDTOs(
+                    auditLogRepository.findAll(spec, Sort.by("createdAt").descending()));
             return new PageResponse<>(items, 1, 1, items.size());
         }
 
@@ -1175,9 +1166,7 @@ public class HistoryService {
                 spec, PageRequest.of(Math.max(page - 1, 0), PAGE_SIZE, Sort.by("createdAt").descending())
         );
 
-        List<AuditLogDTO> items = pageResult.getContent().stream()
-                .map(log -> AuditLogDTO.from(log, auditLogService.getUserName(log.getUserId()), objectMapper))
-                .collect(Collectors.toList());
+        List<AuditLogDTO> items = toAuditLogDTOs(pageResult.getContent());
 
         return new PageResponse<>(items, page, pageResult.getTotalPages(), pageResult.getTotalElements());
     }
@@ -1251,5 +1240,34 @@ public class HistoryService {
 
             return cb.exists(activeElection);
         };
+    }
+
+    private List<AuditLogDTO> toAuditLogDTOs(List<AuditLog> logs) {
+        Map<UUID, String> pictureByUser = new HashMap<>();
+
+        for (AuditLog log : logs) {
+            UUID userId = log.getUserId();
+            if (userId == null || pictureByUser.containsKey(userId)) continue;
+            pictureByUser.put(userId, resolveProfilePictureUrl(userId));
+        }
+
+        return logs.stream()
+                .map(log -> {
+                    AuditLogDTO dto = AuditLogDTO.from(
+                            log, auditLogService.getUserName(log.getUserId()), objectMapper);
+                    dto.setProfilePictureUrl(pictureByUser.get(log.getUserId()));
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+    // null when the user has no picture (the page then falls back to initials)
+    private String resolveProfilePictureUrl(UUID userId) {
+        return userProfileRepository.findByAuthUserId(userId)
+                .or(() -> userProfileRepository.findById(userId))
+                .map(UserProfile::getProfilePictureUrl)
+                .filter(path -> !path.isBlank())
+                .map(path -> "/files/" + path)
+                .orElse(null);
     }
 }

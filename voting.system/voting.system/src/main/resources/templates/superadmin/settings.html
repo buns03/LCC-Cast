@@ -798,6 +798,8 @@ SIDEBAR
          SECURITY
     ====================================================== -->
 
+
+
       <section id="securitySettings" class="settings-panel">
         <div class="settings-card">
           <div class="settings-card-header">
@@ -812,6 +814,74 @@ SIDEBAR
 
           <form class="security-form" novalidate>
 
+            <!-- PROFILE PICTURE -->
+            <div class="profile-picture-section">
+              <div class="profile-picture-preview">
+                <img
+                        id="profilePicturePreview"
+                        th:src="${profilePictureUrl} ?: '/images/default-avatar.png'"
+                        alt="Profile Picture"
+                />
+              </div>
+
+              <div class="profile-picture-info">
+                <h3>Profile Picture</h3>
+                <p>Upload a new profile picture. It is only applied after you click Save.</p>
+
+                <input
+                        type="file"
+                        id="profilePictureInput"
+                        accept="image/png,image/jpeg,image/webp"
+                        hidden
+                />
+
+                <button type="button" class="secondary-btn" id="changeProfilePicture">
+                  <i class="bi bi-camera"></i>
+                  Change Picture
+                </button>
+              </div>
+            </div>
+
+            <!-- EMAIL -->
+            <div class="form-group">
+              <label for="currentEmailDisplay"> Email Address </label>
+
+              <div class="field-with-action">
+                <input
+                        type="email"
+                        id="currentEmailDisplay"
+                        th:value="${email}"
+                        readonly
+                        disabled
+                />
+
+                <button
+                        type="button"
+                        class="secondary-btn change-toggle-btn"
+                        id="changeEmailBtn"
+                >
+                  Change
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group change-fields" id="emailChangeFields" hidden>
+              <label for="newEmail"> New Email Address </label>
+
+              <input
+                      type="email"
+                      id="newEmail"
+                      name="newEmail"
+                      placeholder="Enter new email"
+                      autocomplete="email"
+              />
+
+              <small class="field-error" id="newEmailError">
+                Please enter a valid email address.
+              </small>
+            </div>
+
+            <!-- CURRENT PASSWORD (existing, unchanged) -->
             <div class="form-group">
               <label for="currentPassword"> Current Password </label>
 
@@ -832,6 +902,7 @@ SIDEBAR
               <small class="field-error"> This field is required. </small>
             </div>
 
+            <!-- NEW / CONFIRM PASSWORD (existing, unchanged) -->
             <div class="form-grid">
               <div class="form-group">
                 <label for="newPassword"> New Password </label>
@@ -847,13 +918,13 @@ SIDEBAR
                 <small id="securityNewPasswordStrength" class="password-strength-message"></small>
 
                 <small class="field-error password-same-error">
-                  <span class="required-message">
-                    This field is required.
-                  </span>
+        <span class="required-message">
+          This field is required.
+        </span>
 
                   <span class="password-same-message">
-                    New password cannot be the same as your current password.
-                  </span>
+          New password cannot be the same as your current password.
+        </span>
                 </small>
               </div>
 
@@ -875,45 +946,15 @@ SIDEBAR
                 </div>
 
                 <small class="field-error password-match-error">
-                  <span class="required-message">
-                    This field is required.
-                  </span>
+        <span class="required-message">
+          This field is required.
+        </span>
 
                   <span class="password-mismatch-message">
-                    Passwords do not match.
-                  </span>
+          Passwords do not match.
+        </span>
                 </small>
               </div>
-            </div>
-
-            <div class="security-options">
-<!--              <label class="setting-toggle">-->
-<!--                <span>-->
-<!--                  <strong>Require Strong Passwords</strong>-->
-
-<!--                  <small>-->
-<!--                    Require administrators to use stronger passwords.-->
-<!--                  </small>-->
-<!--                </span>-->
-
-<!--                <input type="checkbox" checked />-->
-
-<!--                <span class="toggle-slider"></span>-->
-<!--              </label>-->
-
-              <label class="setting-toggle">
-                <span>
-                  <strong>Auto Logout</strong>
-
-                  <small>
-                    Automatically sign out inactive administrators.
-                  </small>
-                </span>
-
-                <input type="checkbox" id="autoLogoutToggle" checked />
-
-                <span class="toggle-slider"></span>
-              </label>
             </div>
 
             <div class="settings-form-actions">
@@ -921,51 +962,13 @@ SIDEBAR
                 Discard
               </button>
 
-              <button type="submit" class="save-btn" id="updateSecurityBtn">Update Security</button>
+              <button type="submit" class="save-btn" id="updateSecurityBtn">Save Changes</button>
             </div>
           </form>
         </div>
       </section>
     </main>
 
-    <!-- =========================================================
-     GLOBAL LOGOUT MODAL
-========================================================= -->
-
-    <div id="logoutModal" class="modal-overlay" aria-hidden="true">
-      <div
-        class="logout-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="logoutModalTitle"
-      >
-        <!-- ICON -->
-
-        <div class="logout-modal-icon">
-          <i class="bi bi-box-arrow-right"></i>
-        </div>
-
-        <!-- CONTENT -->
-
-        <div class="logout-modal-content">
-          <h2 id="logoutModalTitle">Logout?</h2>
-
-          <p>Are you sure you want to logout?</p>
-        </div>
-
-        <!-- BUTTONS -->
-
-        <div class="modal-footer">
-          <button type="button" class="logout-cancel-btn" id="cancelLogout">
-            Cancel
-          </button>
-
-          <button type="button" class="logout-confirm-btn" id="confirmLogout">
-            Logout
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- =========================================================
      ADD ADMIN CONFIRMATION MODAL
