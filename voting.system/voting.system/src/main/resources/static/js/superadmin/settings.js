@@ -32,7 +32,6 @@ async function fetchAdmins() {
   renderAdmins();
   initializeAdminControls();
   initializeElectionManagementFields();
-  initializePasswordToggles();
   initializeDynamicEditForms();
 
   if (window.renderAdminPage) window.renderAdminPage();
@@ -1560,43 +1559,31 @@ function initializeAdminPagination() {
    PASSWORD TOGGLES
 ========================================================= */
 
+let passwordTogglesBound = false;
+
 function initializePasswordToggles() {
-  const toggles = document.querySelectorAll(".password-toggle");
+  if (passwordTogglesBound) return;
+  passwordTogglesBound = true;
 
-  toggles.forEach((toggle) => {
-    toggle.addEventListener("click", () => {
-      let input;
+  document.addEventListener("click", (event) => {
+    const toggle = event.target.closest(".password-toggle");
+    if (!toggle || toggle.disabled) return;
 
-      const target = toggle.dataset.target;
+    event.preventDefault();
 
-      if (target) {
-        input = document.getElementById(target);
-      } else {
-        input = toggle.parentElement.querySelector("input");
-      }
+    const target = toggle.dataset.target;
+    const input = target
+      ? document.getElementById(target)
+      : toggle.parentElement.querySelector("input");
 
-      if (!input) return;
+    if (!input) return;
 
-      const icon = toggle.querySelector("i");
+    const icon = toggle.querySelector("i");
+    const show = input.type === "password";
 
-      if (input.type === "password") {
-        input.type = "text";
-
-        if (icon) {
-          icon.className = "bi bi-eye-slash";
-        }
-
-        toggle.setAttribute("aria-label", "Hide password");
-      } else {
-        input.type = "password";
-
-        if (icon) {
-          icon.className = "bi bi-eye";
-        }
-
-        toggle.setAttribute("aria-label", "Show password");
-      }
-    });
+    input.type = show ? "text" : "password";
+    if (icon) icon.className = show ? "bi bi-eye-slash" : "bi bi-eye";
+    toggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
   });
 }
 

@@ -343,6 +343,12 @@ function initializeForgotPasswordInputs() {
     clearFieldError(newPassword, document.getElementById("newPasswordError"));
   });
 
+    wirePasswordStrengthFeedback({
+      passwordInputId: "newPassword",
+      feedbackId: "newPasswordStrength",
+      getButtons: () => [document.getElementById("resetPasswordBtn")],
+    });
+
   confirmPassword.addEventListener("input", () => {
     clearFieldError(
       confirmPassword,
@@ -526,15 +532,15 @@ async function resetPassword() {
     showFieldError(newPassword, newPasswordError, "New password is required.");
 
     isValid = false;
-  } else if (!isValidPassword(newPassword.value)) {
-    showFieldError(
-      newPassword,
-      newPasswordError,
-      "Password must be at least 8 characters.",
-    );
+    } else {
+      const feedback = getPasswordFeedback(newPassword.value);
 
-    isValid = false;
-  }
+      if (!feedback.valid) {
+        showFieldError(newPassword, newPasswordError, feedback.message);
+
+        isValid = false;
+      }
+    }
 
   /* -----------------------------------------
        CONFIRM PASSWORD
@@ -698,6 +704,8 @@ function resetForgotPasswordForm() {
     }
   });
 
+    document.getElementById("newPassword")?.dispatchEvent(new Event("input"));
+
   const errors = [
     "registeredEmailError",
     "otpError",
@@ -790,13 +798,6 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-/* =========================================================
-   PASSWORD VALIDATION
-========================================================= */
-
-function isValidPassword(password) {
-  return password.length >= 8;
-}
 
 /* =========================================================
    JSON RESPONSE
